@@ -66,6 +66,7 @@ class FormField(Base):
     condition_json = Column(Text, nullable=True)  # شروط الإظهار، مثلاً: {"field_key": "value"} يعني يظهر إذا كان field_key يساوي value
     subtitle = Column(String, nullable=True)  # نص فرعي يظهر تحت الحقل
     has_recommendations = Column(Boolean, default=False)  # هل لهذا الحقل توصيات؟
+    recommendation_categories = Column(Text, nullable=True)  # فئات التوصيات المرتبطة بهذا الحقل (JSON)
     order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
 
