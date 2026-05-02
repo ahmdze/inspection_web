@@ -49,6 +49,9 @@ def message_page(title: str, message: str, status_code: int = 200, back_url: str
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # معالجة إعادة التوجيه لتسجيل الدخول
+    if exc.status_code == 302 and exc.detail and exc.detail.startswith("/login"):
+        return RedirectResponse(url=exc.detail, status_code=302)
     kind = "error" if exc.status_code >= 400 else "info"
     title = "حدث خطأ" if exc.status_code >= 400 else "رسالة"
     # استخدام referer من الطلب إذا كان متاحًا
