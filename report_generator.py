@@ -20,7 +20,11 @@ def set_font_style(run, size=12, bold=False):
     run.bold = bold
     rPr = run._element.get_or_add_rPr()
     rFonts = OxmlElement("w:rFonts")
-    for attr, value in [("w:ascii", "Times New Roman"), ("w:hAnsi", "Times New Roman"), ("w:cs", "Times New Roman")]:
+    for attr, value in [
+        ("w:ascii", "Times New Roman"),
+        ("w:hAnsi", "Times New Roman"),
+        ("w:cs", "Times New Roman"),
+    ]:
         rFonts.set(qn(attr), value)
     rPr.append(rFonts)
     rPr.append(OxmlElement("w:rtl"))
@@ -62,8 +66,8 @@ def _add_field(doc, label, value):
     return p
 
 
-def _add_field_no_label(doc, value):
-    """Add a paragraph with just the value, no label prefix"""
+def _add_value_only(doc, value):
+    """فقرة تحتوي على القيمة بدون عنوان الحقل"""
     p = doc.add_paragraph()
     set_rtl_and_justify(p)
     run_value = p.add_run(clean_numeric_value(value))
@@ -71,7 +75,118 @@ def _add_field_no_label(doc, value):
     return p
 
 
+# ─── دالة تكرارية لرسم شجرة الأقسام ─────────────────────────────────────────
+def _render_section_tree(doc, flat_sections, section_id, level=0):
+    """
+    تعمل بشكل تكراري على أي عمق من الأقسام.
+
+    flat_sections: قاموس  { section_id(int) : { id, name, order, parent_id, data:[...] } }
+
+    level=0  → قسم رئيسي        (حجم خط 16)
+    level=1  → قسم فرعي         (حجم خط 14)
+    level=2+ → قسم فرعي فرعي   (حجم خط 13)
+
+    بيانات القسم الرئيسي تُعرض بـ label+value.
+    بيانات الأقسام الفرعية تُعرض بـ value فقط.
+    """
+    section = flat_sections.get(section_id)
+    if not section:
+        return
+
+    # ─ تحقق من وجود بيانات في هذا الفرع أو أي تابع له ─
+    def has_data(sid):
+        sec = flat_sections.get(sid)
+        if not sec:
+            return False
+        if sec.get("data"):
+            return True
+        children_ids = [s["id"] for s in flat_sections.values() if s.get("parent_id") == sid]
+        return any(has_data(cid) for cid in children_ids)
+
+    if not has_data(section_id):
+        return
+
+    # ─ حجم الخط حسب المستوى ─
+    title_size = 16 if level == 0 else (14 if level == 1 else 13)
+
+    # ─ كتابة اسم القسم ─
+    _add_title(doc, section.get("name", ""), title_size)
+
+    # ─ كتابة بيانات هذا القسم ─
+    section_data = sorted(section.get("data", []), key=lambda x: x.get("order", 0))
+    for item in section_data:
+        if level == 0:
+            # القسم الرئيسي: اسم الحقل + القيمة
+            _add_field(doc, item.get("label", ""), item.get("value", ""))
+        else:
+            # الأقسام الفرعية بأي مستوى: القيمة فقط
+            _add_value_only(doc, item.get("value", ""))
+
+    # ─ الأقسام الأبناء بشكل تكراري ─
+    children = sorted(
+        [s for s in flat_sections.values() if s.get("parent_id") == section_id],
+        key=lambda x: x.get("order", 0),
+    )
+    for child in children:
+        _render_section_tree(doc, flat_sections, child["id"], level + 1)
+
+
+# ─── بناء قاموس مفلطح من بيانات الإجابات ────────────────────────────────────
+def build_flat_sections(all_sections_db, all_submissions, field_map):
+    """
+    تحوّل قائمة الأقسام من قاعدة البيانات + الإجابات إلى قاموس مفلطح.
+
+    all_sections_db : نتيجة db.query(Section).all()
+    all_submissions : نتيجة db.query(Submission).filter(...).all()
+    field_map       : { field_key: FormField }
+
+    تُرجع: { section_id(int): { id, name, order, parent_id, data:[{label,value,order}] } }
+    """
+    import json
+
+    flat = {}
+    for sec in all_sections_db:
+        flat[sec.id] = {
+            "id": sec.id,
+            "name": sec.name,
+            "order": sec.order,
+            "parent_id": sec.parent_id,
+            "data": [],
+        }
+
+    for sub in all_submissions:
+        try:
+            answers = json.loads(sub.answers_json)
+        except Exception:
+            continue
+
+        for key, val in answers.items():
+            if not val or key.startswith("rec_enable_") or key.startswith("rec_"):
+                continue
+            field = field_map.get(key)
+            if not field or field.section_id is None:
+                continue
+            if field.section_id in flat:
+                flat[field.section_id]["data"].append(
+                    {
+                        "label": field.label,
+                        "value": str(val),
+                        "order": field.order,
+                    }
+                )
+
+    return flat
+
+
+# ─── الدالة الرئيسية لتوليد التقرير ─────────────────────────────────────────
 def build_web_report(data: dict, output_folder: str) -> str:
+    """
+    data يحتوي على:
+      general               : { institution, visit_date, ...حقول عامة }
+      flat_sections         : { section_id(int): { id, name, order, parent_id, data:[...] } }
+      recommendations       : { rec_a: [...], rec_b: [...], rec_c: [...], rec_d: [...] }
+      recommendation_categories : [{ key, label, order }, ...]
+    """
     general = data.get("general", {})
     inst = general.get("institution") or "غير محدد"
     date = general.get("visit_date") or "غير محدد"
@@ -108,58 +223,42 @@ def build_web_report(data: dict, output_folder: str) -> str:
         _add_field(doc, label, value)
     doc.add_paragraph(" ")
 
-    # ─── الأقسام ─────────────────────────────────────────────────────
-    # الهيكل المتوقع في data["sections"]:
-    #   { section_id: { "name", "order", "data": [...], "subsections": { subsec_id: { "name", "order", "data": [...] } } } }
-    #
-    # المطلوب في التقرير:
-    #   اسم القسم الرئيسي (كبير)
-    #     اسم القسم الفرعي الأول (متوسط)
-    #       إجابات القسم الفرعي الأول
-    #     اسم القسم الفرعي الثاني (متوسط)
-    #       إجابات القسم الفرعي الثاني
-    #   (وهكذا)
+    # ─── الأقسام بالهيكل التكراري ───────────────────────────────────
+    flat_sections = data.get("flat_sections", {})
 
-    sections = data.get("sections", {})
-
-    for _, section in sorted(sections.items(), key=lambda item: item[1].get("order", 0)):
-        section_data = sorted(section.get("data", []), key=lambda item: item.get("order", 0))
-        subsections = sorted(
-            section.get("subsections", {}).items(),
-            key=lambda item: item[1].get("order", 0)
+    if flat_sections:
+        # الأقسام الجذرية (بدون أب)
+        root_sections = sorted(
+            [s for s in flat_sections.values() if s.get("parent_id") is None],
+            key=lambda x: x.get("order", 0),
         )
+        for root in root_sections:
+            _render_section_tree(doc, flat_sections, root["id"], level=0)
+            doc.add_paragraph(" ")
 
-        # تحقق هل يوجد بيانات فعلية لهذا القسم أو أقسامه الفرعية
-        has_any_data = bool(section_data) or any(
-            sub.get("data") for _, sub in subsections
-        )
-        if not has_any_data:
-            continue
-
-        # ① اسم القسم الرئيسي
-        _add_title(doc, section.get("name", "محور"), 16)
-
-        # ② بيانات القسم الرئيسي مباشرةً (إن وُجدت)
-        for item in section_data:
-            _add_field(doc, item.get("label", ""), item.get("value", ""))
-
-        # ③ الأقسام الفرعية
-        for _, subsection in subsections:
-            subsection_data = sorted(
-                subsection.get("data", []),
-                key=lambda item: item.get("order", 0)
+    else:
+        # ─ توافق مع الهيكل القديم (مستويان فقط) ─
+        sections = data.get("sections", {})
+        for _, section in sorted(sections.items(), key=lambda item: item[1].get("order", 0)):
+            section_data = sorted(section.get("data", []), key=lambda x: x.get("order", 0))
+            subsections = sorted(
+                section.get("subsections", {}).items(),
+                key=lambda item: item[1].get("order", 0),
             )
-            if not subsection_data:
+            has_any = bool(section_data) or any(s.get("data") for _, s in subsections)
+            if not has_any:
                 continue
-
-            # اسم القسم الفرعي
-            _add_title(doc, subsection.get("name", ""), 14)
-
-            # إجابات القسم الفرعي (القيمة فقط بدون عنوان الحقل)
-            for item in subsection_data:
-                _add_field_no_label(doc, item.get("value", ""))
-
-        doc.add_paragraph(" ")
+            _add_title(doc, section.get("name", "محور"), 16)
+            for item in section_data:
+                _add_field(doc, item.get("label", ""), item.get("value", ""))
+            for _, sub in subsections:
+                sub_data = sorted(sub.get("data", []), key=lambda x: x.get("order", 0))
+                if not sub_data:
+                    continue
+                _add_title(doc, sub.get("name", ""), 14)
+                for item in sub_data:
+                    _add_value_only(doc, item.get("value", ""))
+            doc.add_paragraph(" ")
 
     # ─── التوصيات ────────────────────────────────────────────────────
     recommendations = data.get("recommendations", {})
@@ -175,30 +274,24 @@ def build_web_report(data: dict, output_folder: str) -> str:
     )
 
     if has_recommendations:
-        # ① صفحة جديدة
+        # صفحة جديدة
         doc.add_page_break()
-
-        # ② عنوان "التوصيات:" في أعلى الصفحة الجديدة
-        _add_title(doc, "التوصيات:", 16, align=WD_ALIGN_PARAGRAPH.JUSTIFY)
+        # عنوان التوصيات
+        _add_title(doc, "التوصيات:", 16, align=WD_ALIGN_PARAGRAPH.CENTER)
         doc.add_paragraph(" ")
 
         for cat in rec_categories:
-            items = [item for item in recommendations.get(cat["key"], []) if str(item).strip()]
+            items = [i for i in recommendations.get(cat["key"], []) if str(i).strip()]
             if not items:
                 continue
-
-            # ③ العنوان الفرعي (الحرف فقط مثل: أ/ أو ب/)
-            # نعرض النص الكامل للفئة (label) دون اسم القسم التابعة له
-            sub_label = cat["label"]   # مثال: "أ/ الإيعاز إلى دائرة صحة بغداد الرصافة/ قسم التخطيط:"
-            _add_title(doc, sub_label, 13)
-
-            # ④ الإجابات كقائمة مرقمة بدون اسم القسم
+            # العنوان الفرعي للفئة
+            _add_title(doc, cat["label"], 13)
+            # الإجابات مرقمة
             for idx, item in enumerate(items, start=1):
                 p = doc.add_paragraph()
                 set_rtl_and_justify(p)
                 set_font_style(p.add_run(f"{idx}. "), size=12, bold=True)
                 set_font_style(p.add_run(str(item).strip()), size=12)
-
             doc.add_paragraph(" ")
 
     doc.save(path)

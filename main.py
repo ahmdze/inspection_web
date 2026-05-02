@@ -1021,123 +1021,91 @@ async def view_session(sid: int, request: Request, user=Depends(require_role(Rol
 
 @app.post("/generate/{sid}")
 async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    from report_generator import build_web_report, build_flat_sections
+ 
     s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
     if not s:
         raise HTTPException(404)
-    
+ 
     subs = db.query(Submission).filter(Submission.session_id == sid).all()
     if not subs:
         raise HTTPException(400, "لا توجد إجابات")
-    
-    # تجميع البيانات
-    merged = {
-        "general": {
-            "institution": s.institution,
-            "visit_date": s.visit_date
-        },
-        "sections": {},  # بدلاً من الأقسام الثابتة
-        "recommendations": {
-            "rec_a": [],
-            "rec_b": [],
-            "rec_c": [],
-            "rec_d": []
-        },
-        "recommendation_categories": [
-            {"key": r.key, "label": r.label, "order": r.order}
-            for r in db.query(RecommendationCategory).filter(RecommendationCategory.is_active == True).order_by(RecommendationCategory.order).all()
-        ]
-    }
-    
-    # جلب جميع الحقول من قاعدة البيانات
-    all_fields = db.query(FormField).all()
-    field_map = {f.field_key: f for f in all_fields}
-    
-    # جلب الأقسام المتداخلة
+ 
+    # ─── جلب كل الحقول والأقسام من قاعدة البيانات ───────────────────
+    from database import FormField, Section, RecommendationCategory
+    import json
+ 
+    all_fields   = db.query(FormField).all()
+    field_map    = {f.field_key: f for f in all_fields}
     all_sections = db.query(Section).all()
-    section_map = {s.id: s for s in all_sections}
-    
-    # بناء هيكل الأقسام
-    def build_section_structure():
-        root_sections = [sec for sec in all_sections if sec.parent_id is None]
-        for root in root_sections:
-            merged["sections"][root.id] = {
-                "name": root.name,
-                "order": root.order,
-                "data": [],
-                "subsections": {}
-            }
-            # الأقسام الفرعية
-            children = [sec for sec in all_sections if sec.parent_id == root.id]
-            for child in children:
-                merged["sections"][root.id]["subsections"][child.id] = {
-                    "name": child.name,
-                    "order": child.order,
-                    "data": []
-                }
-    
-    build_section_structure()
-    
+ 
+    # ─── بناء القاموس المفلطح التكراري ──────────────────────────────
+    flat_sections = build_flat_sections(all_sections, subs, field_map)
+ 
+    # ─── تجميع التوصيات ──────────────────────────────────────────────
+    recommendations = {"rec_a": [], "rec_b": [], "rec_c": [], "rec_d": []}
+ 
     for sub in subs:
-        ans = json.loads(sub.answers_json)
-        
-        for k, v in ans.items():
+        try:
+            answers = json.loads(sub.answers_json)
+        except Exception:
+            continue
+ 
+        for k, v in answers.items():
             if not v or k.startswith("rec_enable_"):
                 continue
-            if k.startswith("rec_"):
-                cat_key = "rec_d"
-                for cat in ["rec_a", "rec_b", "rec_c", "rec_d"]:
-                    if k.endswith(f"_{cat}"):
-                        cat_key = cat
-                        break
-                linked_field_key = k[4:-(len(cat_key) + 1)] if k.endswith(f"_{cat_key}") else k[4:]
-                if str(v).strip():
-                    merged["recommendations"][cat_key].append(str(v))
+            # مفاتيح التوصيات تبدأ بـ rec_ وتنتهي بـ _rec_a / _rec_b / ...
+            if not k.startswith("rec_"):
                 continue
-                
+            cat_key = None
+            for cat in ["rec_a", "rec_b", "rec_c", "rec_d"]:
+                if k.endswith(f"_{cat}"):
+                    cat_key = cat
+                    break
+            if cat_key and str(v).strip():
+                recommendations[cat_key].append(str(v))
+ 
+    # ─── تجميع المعلومات العامة ──────────────────────────────────────
+    general = {
+        "institution": s.institution,
+        "visit_date": s.visit_date,
+    }
+    # الحقول التي section_id = None تُعامل كمعلومات عامة
+    for sub in subs:
+        try:
+            answers = json.loads(sub.answers_json)
+        except Exception:
+            continue
+        for k, v in answers.items():
+            if not v or k.startswith("rec_"):
+                continue
             field = field_map.get(k)
-            if not field:
-                continue
-            
-            # المعلومات العامة
-            if field.section_id is None:
-                merged["general"][field.label] = str(v)
-            # التوصيات - حسب الفئة
-            elif k.startswith("rec_") and not k.startswith("rec_enable_"):
-                # استخراج رمز الفئة (rec_a, rec_b, rec_c, rec_d)
-                cat_key = "rec_d"  # القيمة الافتراضية
-                for cat in ["rec_a", "rec_b", "rec_c", "rec_d"]:
-                    if k.endswith(f"_{cat}"):
-                        cat_key = cat
-                        break
-                
-                if str(v).strip():
-                    merged["recommendations"][cat_key].append(str(v))
-            # البيانات الأخرى - حسب الأقسام
-            elif field.section_id:
-                section = section_map.get(field.section_id)
-                if section:
-                    data_item = {
-                        "label": field.label,
-                        "value": str(v),
-                        "order": field.order
-                    }
-                    
-                    if section.parent_id is None:
-                        # قسم رئيسي
-                        if section.id in merged["sections"]:
-                            merged["sections"][section.id]["data"].append(data_item)
-                    else:
-                        # قسم فرعي
-                        parent_id = section.parent_id
-                        if parent_id in merged["sections"] and section.id in merged["sections"][parent_id]["subsections"]:
-                            merged["sections"][parent_id]["subsections"][section.id]["data"].append(data_item)
-    
+            if field and field.section_id is None:
+                general[field.label] = str(v)
+ 
+    # ─── فئات التوصيات ───────────────────────────────────────────────
+    rec_cats = [
+        {"key": r.key, "label": r.label, "order": r.order}
+        for r in db.query(RecommendationCategory)
+                   .filter(RecommendationCategory.is_active == True)
+                   .order_by(RecommendationCategory.order)
+                   .all()
+    ]
+ 
+    # ─── بناء data وتمريره للمولّد ───────────────────────────────────
+    merged = {
+        "general": general,
+        "flat_sections": flat_sections,
+        "recommendations": recommendations,
+        "recommendation_categories": rec_cats,
+    }
+ 
     os.makedirs("reports", exist_ok=True)
     path = build_web_report(merged, "reports")
     return FileResponse(
         path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=os.path.basename(path)
+        filename=os.path.basename(path),
     )
 
 # ================== تصدير واستيراد المستخدمين ==================
