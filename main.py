@@ -926,6 +926,7 @@ async def inspect_form(code: str, user=Depends(get_current_user), db: Session = 
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-50 p-4">
+    <div id="sync-status" class="fixed top-2 right-2 bg-blue-600 text-white px-4 py-2 rounded shadow-lg z-50 text-sm font-bold">🔄 جاري التحميل...</div>
     <div class="max-w-2xl mx-auto bg-white p-6 rounded shadow">
       <div class="bg-blue-600 text-white p-4 rounded-t -mx-6 -mt-6 mb-6">
         <h1 class="text-xl font-bold">{sess.institution} | {sess.visit_date}</h1>
@@ -937,19 +938,77 @@ async def inspect_form(code: str, user=Depends(get_current_user), db: Session = 
         <select id="axis-selector" class="w-full p-3 border rounded text-lg focus:ring-2 focus:ring-blue-500" onchange="showSection(this.value)">{section_opts}</select>
       </div>
       
-      <form action="/inspect/submit" method="post" class="space-y-4" novalidate>
+      <form action="/inspect/submit" method="post" class="space-y-4" novalidate id="inspectionForm">
         <input type="hidden" name="session_id" value="{sess.id}">
         <input type="hidden" name="unit_name" value="مفتش">
         {sections_html}
         <button type="submit" class="w-full bg-green-600 text-white py-3 rounded font-bold text-lg hover:bg-green-700">✅ حفظ الإجابات</button>
       </form>
     </div>
+    <script src="/static/register-sw.js"></script>
+    <script src="/static/offline.js"></script>
     <script>
       function showSection(id) {{
         document.querySelectorAll('.section-content').forEach(s => s.classList.add('hidden'));
         document.getElementById(id).classList.remove('hidden');
       }}
       if(document.getElementById('axis-selector')) showSection(document.getElementById('axis-selector').value);
+      
+      // التعامل مع إرسال النموذج بشكل ذكي (أونلاين/أوفلاين)
+      document.getElementById('inspectionForm').addEventListener('submit', async function(e) {{
+        e.preventDefault();
+        const btn = this.querySelector('button[type=submit]');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'جاري الحفظ...';
+        
+        const sessionId = this.querySelector('input[name="session_id"]').value;
+        const formData = new FormData(this);
+        const data = {{ code: sessionId, ...Object.fromEntries(formData) }};
+        data.answers_json = JSON.stringify(Object.fromEntries(formData));
+        
+        try {{
+          if (navigator.onLine) {{
+            // إرسال مباشر للسيرفر
+            const response = await fetch('/inspect/submit', {{
+              method: 'POST',
+              body: formData,
+              redirect: 'manual'
+            }});
+            if (response.ok || response.status === 302) {{
+              window.location.href = '/inspect/success';
+              return;
+            }}
+          }}
+          // حفظ محلي إذا كان أوفلاين أو فشل الإرسال
+          await initDB();
+          await save(data);
+          const statusEl = document.getElementById('sync-status');
+          if (statusEl) {{
+            statusEl.textContent = '💾 تم الحفظ محلياً - سيرفع عند الاتصال';
+            statusEl.classList.remove('bg-blue-600');
+            statusEl.classList.add('bg-green-600');
+          }}
+          setTimeout(() => window.location.href = '/inspect/success', 1000);
+        }} catch(err) {{
+          // حفظ محلي في حالة الخطأ
+          try {{
+            await initDB();
+            await save(data);
+            const statusEl = document.getElementById('sync-status');
+            if (statusEl) {{
+              statusEl.textContent = '💾 تم الحفظ محلياً - سيرفع عند الاتصال';
+              statusEl.classList.remove('bg-blue-600');
+              statusEl.classList.add('bg-green-600');
+            }}
+            setTimeout(() => window.location.href = '/inspect/success', 1000);
+          }} catch(e) {{
+            btn.disabled = false;
+            btn.textContent = originalText;
+            alert('❌ حدث خطأ: ' + err.message);
+          }}
+        }}
+      }});
     </script></body></html>"""
 
 @app.post("/inspect/submit")
