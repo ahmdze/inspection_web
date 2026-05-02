@@ -40,7 +40,42 @@ def get_current_user(request: Request, db: Session):
 
 @router.get("/inspect/success", response_class=HTMLResponse)
 async def success():
-    return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4 flex items-center justify-center h-screen"><div class="bg-white p-8 rounded shadow text-center"><h1 class="text-2xl font-bold text-green-600 mb-2">✅ تم الحفظ بنجاح</h1><p class="text-gray-600 mb-4">سيتم دمج البيانات في التقرير النهائي.</p><a href="/dashboard" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة للوحة</a></div></body></html>"""
+    return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4 flex items-center justify-center h-screen"><div id="sync-status" class="fixed top-0 left-0 right-0 bg-green-600 text-white text-center py-2 font-bold hidden"></div><div class="bg-white p-8 rounded shadow text-center"><h1 class="text-2xl font-bold text-green-600 mb-2">✅ تم الحفظ بنجاح</h1><p class="text-gray-600 mb-4">سيتم دمج البيانات في التقرير النهائي.</p><p id="sync-msg" class="text-sm text-blue-600 mb-4"></p><a href="/inspect/dashboard" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة للوحة</a></div></body><script src="/static/offline.js"></script><script>
+// عرض حالة المزامنة في صفحة النجاح
+document.addEventListener('DOMContentLoaded', async () => {
+    const syncMsg = document.getElementById('sync-msg');
+    
+    // التحقق من وجود بيانات معلقة
+    if (typeof getPending === 'function') {
+        try {
+            await initDB();
+            const pending = await getPending();
+            if (pending.length > 0) {
+                syncMsg.textContent = '📦 لديك ' + pending.length + ' تقرير(s) قيد الانتظار للرفع';
+                syncMsg.classList.add('animate-pulse');
+                
+                // بدء المزامنة فوراً إذا كان متصلاً
+                if (navigator.onLine) {
+                    syncMsg.textContent = '🔄 جاري رفع البيانات المعلقة...';
+                    await sync();
+                    const remaining = await getPending();
+                    if (remaining.length === 0) {
+                        syncMsg.textContent = '✅ تم رفع جميع البيانات بنجاح!';
+                        syncMsg.classList.remove('animate-pulse');
+                        syncMsg.classList.add('text-green-600');
+                    } else {
+                        syncMsg.textContent = '⚠️ لا يزال هناك ' + remaining.length + ' تقرير(s) لم ترفع';
+                    }
+                } else {
+                    syncMsg.textContent = '📴 ستُرفع البيانات تلقائياً عند الاتصال بالإنترنت';
+                }
+            }
+        } catch(e) {
+            console.error('Error checking pending submissions:', e);
+        }
+    }
+});
+</script></html>"""
 
 
 @router.get("/inspect/dashboard", response_class=HTMLResponse)
@@ -379,20 +414,29 @@ async def submit_dynamic(request: Request, db: Session = Depends(get_db), bg=Non
 
     user = get_current_user(request, db)
     form = await request.form()
-    session_id = int(form.get("session_id", 0))
+    
+    # تحويل session_id إلى رقم صحيح
+    try:
+        session_id = int(form.get("session_id", 0))
+    except (ValueError, TypeError):
+        session_id = 0
+    
+    if session_id == 0:
+        raise HTTPException(400, "رقم الجلسة غير صحيح")
+    
     sess = db.query(InspectionSession).filter(
         InspectionSession.id == session_id,
         InspectionSession.status == "open"
     ).first()
     if not sess:
-        raise HTTPException(400, "الجولة مغلقة")
+        raise HTTPException(400, "الجولة مغلقة أو غير موجودة")
 
     answers = {}
     for k, v in form.items():
         if k in ["unit_name", "session_id"]:
             continue
-        if not k.startswith("rec_enable_") and v.strip():
-            answers[k] = v.strip()
+        if not k.startswith("rec_enable_") and v and str(v).strip():
+            answers[k] = str(v).strip()
 
     db.add(Submission(
         session_id=sess.id,
