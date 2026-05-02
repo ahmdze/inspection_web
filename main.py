@@ -109,9 +109,15 @@ async def dashboard(user=Depends(get_current_user)):
 
 # ================== باني النموذج ==================
 @app.get("/admin/form-builder", response_class=HTMLResponse)
-async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db), edit_template_id: int = Query(None)):
+async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db), edit_template_id: int = Query(default=None)):
     # جلب الأقسام من قاعدة البيانات
     root_sections = db.query(Section).filter(Section.parent_id == None).order_by(Section.order).all()
+    
+    # معالجة edit_template_id بشكل آمن
+    try:
+        edit_tid = int(edit_template_id) if edit_template_id else None
+    except (ValueError, TypeError):
+        edit_tid = None
     
     def build_section_tree(parent_section, level=0):
         html = ""
@@ -126,10 +132,10 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
             items = "".join(f'''<li class="flex justify-between items-center bg-white p-2 mb-1 rounded border">
               <div><span class="font-bold text-blue-700">[{f.order}]</span> {f.label} <code class="text-xs bg-gray-100 px-1 rounded">{f.field_key}</code>
               <span class="text-xs text-gray-500 ml-2">{'✓ توصيات' if f.has_recommendations else ''}</span></div>
-              <a href="/admin/form-field/edit/{f.id}?edit_template_id={edit_template_id or ''}" class="text-sm text-blue-600 hover:underline">✏️ تعديل</a></li>''' for f in fields)
+              <a href="/admin/form-field/edit/{f.id}?edit_template_id={edit_tid or ''}" class="text-sm text-blue-600 hover:underline">✏️ تعديل</a></li>''' for f in fields)
             html += f'<ul class="space-y-1">{items}</ul>'
         
-        html += f'<a href="/admin/form-field/new?section_id={parent_section.id}&edit_template_id={edit_template_id or ""}" class="inline-block mt-2 bg-blue-600 text-white text-xs px-3 py-1 rounded">➕ إضافة حقل</a></div>'
+        html += f'<a href="/admin/form-field/new?section_id={parent_section.id}&edit_template_id={edit_tid or ""}" class="inline-block mt-2 bg-blue-600 text-white text-xs px-3 py-1 rounded">➕ إضافة حقل</a></div>'
         
         # الأقسام الفرعية
         child_sections = db.query(Section).filter(Section.parent_id == parent_section.id).order_by(Section.order).all()
@@ -141,7 +147,7 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
     sections_html = ""
     for section in root_sections:
         sections_html += build_section_tree(section)
-    edit_template = db.query(FormTemplate).filter(FormTemplate.id == edit_template_id).first() if edit_template_id else None
+    edit_template = db.query(FormTemplate).filter(FormTemplate.id == edit_tid).first() if edit_tid else None
     edit_save_bar = f'<form action="/admin/templates/{edit_template.id}/update-from-builder" method="post" class="mb-4 p-3 bg-green-50 border border-green-200 rounded flex justify-between items-center"><span class="font-bold text-green-800">تعديل النموذج: {edit_template.name}</span><button class="bg-green-600 text-white px-4 py-2 rounded">حفظ التعديل على نفس النموذج</button></form>' if edit_template else ""
     
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -165,22 +171,32 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
     </script></body></html>"""
 
 @app.get("/admin/form-field/new", response_class=HTMLResponse)
-async def new_field(user=Depends(require_role(Role.ADMIN.value)), section_id: int = Query(None), edit_template_id: int = Query(None), db: Session = Depends(get_db)):
+async def new_field(user=Depends(require_role(Role.ADMIN.value)), section_id: int = Query(None), edit_template_id: int = Query(default=None), db: Session = Depends(get_db)):
     if not section_id:
         raise HTTPException(400, "يجب تحديد القسم")
     section = db.query(Section).filter(Section.id == section_id).first()
     if not section:
         raise HTTPException(404, "القسم غير موجود")
-    return _render_field_form(None, section_id, section.name, db, edit_template_id)
+    # معالجة edit_template_id الفارغ أو غير الصحيح
+    try:
+        edit_tid = int(edit_template_id) if edit_template_id else None
+    except (ValueError, TypeError):
+        edit_tid = None
+    return _render_field_form(None, section_id, section.name, db, edit_tid)
 
 @app.get("/admin/form-field/edit/{fid}", response_class=HTMLResponse)
-async def edit_field(fid: int, user=Depends(require_role(Role.ADMIN.value)), edit_template_id: int = Query(None), db: Session = Depends(get_db)):
+async def edit_field(fid: int, user=Depends(require_role(Role.ADMIN.value)), edit_template_id: int = Query(default=None), db: Session = Depends(get_db)):
     f = db.query(FormField).filter(FormField.id == fid).first()
     if not f:
         raise HTTPException(404)
     section = db.query(Section).filter(Section.id == f.section_id).first()
     section_name = section.name if section else "غير محدد"
-    return _render_field_form(f, f.section_id, section_name, db, edit_template_id)
+    # معالجة edit_template_id الفارغ أو غير الصحيح
+    try:
+        edit_tid = int(edit_template_id) if edit_template_id else None
+    except (ValueError, TypeError):
+        edit_tid = None
+    return _render_field_form(f, f.section_id, section_name, db, edit_tid)
 
 def _render_field_form(field, section_id, section_name, db, edit_template_id=None):
     rec_categories = db.query(RecommendationCategory).order_by(RecommendationCategory.order).all()
@@ -196,7 +212,20 @@ def _render_field_form(field, section_id, section_name, db, edit_template_id=Non
     opts_html = "".join(f'<div class="flex gap-2 mb-1"><input type="text" name="opt_{i}" value="{o}" class="flex-1 p-1 border rounded"><button type="button" onclick="this.parentElement.remove()" class="text-red-500">🗑️</button></div>' for i,o in enumerate(opts_list))
     
     has_rec_checked = "checked" if vals.get("has_recommendations") else ""
-    rec_cats_options = "".join(f'<label class="flex gap-2 p-2 border rounded mb-1"><input type="checkbox" name="rec_cat" value="{c.key}"> {c.label}</label>' for c in rec_categories)
+    # معالجة التوصيات للحقول الجديدة
+    selected_rec_cats = []
+    if is_edit and hasattr(field, 'recommendation_categories'):
+        try:
+            selected_rec_cats = json.loads(field.recommendation_categories) if field.recommendation_categories else []
+            if not isinstance(selected_rec_cats, list):
+                selected_rec_cats = []
+        except:
+            selected_rec_cats = []
+    
+    rec_cats_options = "".join(f'<label class="flex gap-2 p-2 border rounded mb-1"><input type="checkbox" name="rec_cat" value="{c.key}" {"checked" if c.key in selected_rec_cats else ""}> {c.label}</label>' for c in rec_categories)
+    
+    # معالجة edit_template_id بشكل آمن
+    edit_tid_str = str(edit_template_id) if edit_template_id is not None else ""
 
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-50 p-4"><div class="max-w-xl mx-auto bg-white p-6 rounded shadow"><h1 class="text-xl font-bold mb-2">{'تعديل' if is_edit else 'إضافة'} حقل</h1>
@@ -221,7 +250,7 @@ def _render_field_form(field, section_id, section_name, db, edit_template_id=Non
       </div>
       <input type="hidden" name="section_id" value="{section_id}">
       <input type="hidden" name="id" value="{field.id if is_edit else ''}">
-      <input type="hidden" name="edit_template_id" value="{edit_template_id or ''}">
+      <input type="hidden" name="edit_template_id" value="{edit_tid_str}">
       <input type="hidden" name="options_json" id="options_json">
       <button class="w-full bg-blue-600 text-white py-2 rounded mt-4">💾 حفظ</button></form></div>
     <script>
