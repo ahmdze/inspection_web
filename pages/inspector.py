@@ -275,7 +275,8 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-50 p-4">
-    <div class="max-w-2xl mx-auto bg-white p-6 rounded shadow">
+    <div id="sync-status" class="fixed top-0 left-0 right-0 bg-green-600 text-white text-center py-2 font-bold hidden"></div>
+    <div class="max-w-2xl mx-auto bg-white p-6 rounded shadow mt-8">
       <div class="bg-blue-600 text-white p-4 rounded-t -mx-6 -mt-6 mb-6">
         <h1 class="text-xl font-bold">{sess.institution} | {sess.visit_date}</h1>
         <p class="text-sm opacity-90 mt-1">المفتش: {user.username} | مفتش</p>
@@ -285,8 +286,9 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
         <select id="axis-selector" class="w-full p-3 border rounded text-lg focus:ring-2 focus:ring-blue-500"
                 onchange="showSection(this.value)">{section_opts}</select>
       </div>
-      <form action="/inspect/submit" method="post" class="space-y-4" novalidate>
+      <form id="inspection-form" action="/inspect/submit" method="post" class="space-y-4" novalidate>
         <input type="hidden" name="session_id" value="{sess.id}">
+        <input type="hidden" name="code" value="{code}">
         {sections_html}
         <button type="submit" class="w-full bg-green-600 text-white py-3 rounded font-bold text-lg hover:bg-green-700">✅ حفظ الإجابات</button>
       </form>
@@ -298,7 +300,75 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
       }}
       if (document.getElementById('axis-selector'))
         showSection(document.getElementById('axis-selector').value);
-    </script></body></html>"""
+      
+      // التعامل مع إرسال النموذج
+      document.getElementById('inspection-form').addEventListener('submit', async function(e) {{
+        e.preventDefault();
+        const form = this;
+        const btn = form.querySelector('button[type=submit]');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'جاري الحفظ...';
+        
+        const code = form.querySelector('input[name="code"]').value;
+        const sessionId = form.querySelector('input[name="session_id"]').value;
+        
+        try {{
+          if (navigator.onLine) {{
+            // متصل بالإنترنت - أرسل مباشرة
+            const formData = new FormData(form);
+            const response = await fetch('/inspect/submit', {{
+              method: 'POST',
+              body: formData,
+              redirect: 'manual'
+            }});
+            if (response.ok || response.status === 302) {{
+              window.location.href = '/inspect/success';
+            }} else {{
+              throw new Error('فشل الإرسال');
+            }}
+          }} else {{
+            // غير متصل - احفظ محلياً
+            if (window.handleOfflineSubmit) {{
+              await window.handleOfflineSubmit(form, code);
+            }} else {{
+              // fallback إذا لم يتم تحميل offline.js
+              const data = {{
+                code: code,
+                session_id: sessionId,
+                ...Object.fromEntries(new FormData(form))
+              }};
+              localStorage.setItem('pending_submission', JSON.stringify(data));
+              document.getElementById('sync-status').textContent = '💾 تم الحفظ محلياً - سيرفع عند الاتصال';
+              document.getElementById('sync-status').classList.remove('hidden');
+              setTimeout(() => {{
+                window.location.href = '/inspect/success';
+              }}, 1000);
+            }}
+          }}
+        }} catch (error) {{
+          console.error('Error:', error);
+          // في حالة الخطأ، احفظ محلياً
+          const data = {{
+            code: code,
+            session_id: sessionId,
+            ...Object.fromEntries(new FormData(form))
+          }};
+          localStorage.setItem('pending_submission', JSON.stringify(data));
+          document.getElementById('sync-status').textContent = '💾 تم الحفظ محلياً - سيرفع عند الاتصال';
+          document.getElementById('sync-status').classList.remove('hidden');
+          setTimeout(() => {{
+            window.location.href = '/inspect/success';
+          }}, 1000);
+        }} finally {{
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }}
+      }});
+    </script>
+    <script src="/static/register-sw.js"></script>
+    <script src="/static/offline.js"></script>
+    </body></html>"""
 
 
 @router.post("/inspect/submit")
