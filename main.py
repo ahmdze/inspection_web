@@ -50,11 +50,16 @@ def message_page(title: str, message: str, status_code: int = 200, back_url: str
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     kind = "error" if exc.status_code >= 400 else "info"
     title = "حدث خطأ" if exc.status_code >= 400 else "رسالة"
-    return message_page(title, exc.detail or "تعذر تنفيذ الطلب", exc.status_code, request.headers.get("referer", "/dashboard"), kind)
+    # استخدام referer من الطلب إذا كان متاحًا
+    referer = request.headers.get("referer") or request.headers.get("Referer")
+    back_url = referer if referer else "/dashboard"
+    return message_page(title, exc.detail or "تعذر تنفيذ الطلب", exc.status_code, back_url, kind)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return message_page("بيانات غير مكتملة", "تأكد من تعبئة الحقول المطلوبة ثم حاول مرة أخرى.", 422, request.headers.get("referer", "/dashboard"), "warning")
+    referer = request.headers.get("referer") or request.headers.get("Referer")
+    back_url = referer if referer else "/dashboard"
+    return message_page("بيانات غير مكتملة", "تأكد من تعبئة الحقول المطلوبة ثم حاول مرة أخرى.", 422, back_url, "warning")
 def format_date(date_str):
     """تحويل التاريخ من YYYY-MM-DD إلى DD/MM/YYYY"""
     try:
@@ -234,14 +239,18 @@ def _render_field_form(field, section_id, section_name, db, edit_template_id=Non
 async def save_field(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value))):
     form = await request.form()
     id = form.get("id")
-    field_key = form.get("field_key")
-    label = form.get("label")
+    field_key = form.get("field_key", "").strip()
+    label = form.get("label", "").strip()
     field_type = form.get("field_type", "text")
     section_id = int(form.get("section_id", 0))
     order = int(form.get("order", 1))
     options_json = form.get("options_json", "")
     is_required = "is_required" in form
     has_recommendations = "has_recommendations" in form
+
+    # التحقق من الحقول المطلوبة
+    if not field_key or not label:
+        raise HTTPException(422, "يجب تعبئة مفتاح الحقل والتسمية")
     
     if id:
         f = db.query(FormField).filter(FormField.id == id).first()
