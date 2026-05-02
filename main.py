@@ -1219,89 +1219,106 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
 @app.get("/admin/form-fields/export")
 async def export_form_fields(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     """تصدير جميع الحقول إلى ملف Excel"""
-    fields = db.query(FormField).filter(FormField.is_active == True).order_by(FormField.section_id, FormField.order).all()
-    
-    data = []
-    for f in fields:
-        section = db.query(Section).filter(Section.id == f.section_id).first() if f.section_id else None
-        section_name = section.name if section else ""
+    try:
+        fields = db.query(FormField).filter(FormField.is_active == True).order_by(FormField.section_id, FormField.order).all()
         
-        # استخراج الخيارات كقائمة مفصولة بفواصل
-        options = ""
-        if f.options_json:
-            try:
-                opts_list = json.loads(f.options_json)
-                if isinstance(opts_list, list):
-                    options = " | ".join(opts_list)
-            except:
-                pass
+        data = []
+        for f in fields:
+            section = db.query(Section).filter(Section.id == f.section_id).first() if f.section_id else None
+            section_name = section.name if section else ""
+            
+            # استخراج الخيارات كقائمة مفصولة بفواصل
+            options = ""
+            if f.options_json:
+                try:
+                    opts_list = json.loads(f.options_json)
+                    if isinstance(opts_list, list):
+                        options = " | ".join(str(opt) for opt in opts_list)
+                except Exception:
+                    pass
+            
+            # استخراج فئات التوصيات
+            rec_cats = ""
+            if f.has_recommendations and f.recommendation_categories:
+                try:
+                    rec_list = json.loads(f.recommendation_categories)
+                    if isinstance(rec_list, list):
+                        rec_cats = " | ".join(str(cat) for cat in rec_list)
+                except Exception:
+                    pass
+            
+            # تحويل condition_json إلى نص بشكل آمن
+            condition_str = ""
+            if f.condition_json:
+                if isinstance(f.condition_json, str):
+                    condition_str = f.condition_json
+                else:
+                    try:
+                        condition_str = json.dumps(f.condition_json, ensure_ascii=False)
+                    except Exception:
+                        condition_str = str(f.condition_json)
+            
+            data.append({
+                "section_name": section_name,
+                "field_key": f.field_key,
+                "label": f.label,
+                "field_type": f.field_type,
+                "is_required": bool(f.is_required),
+                "order": f.order or 0,
+                "options": options,
+                "has_recommendations": bool(f.has_recommendations),
+                "recommendation_categories": rec_cats,
+                "subtitle": str(f.subtitle) if f.subtitle else "",
+                "condition": condition_str
+            })
         
-        # استخراج فئات التوصيات
-        rec_cats = ""
-        if f.has_recommendations and f.recommendation_categories:
-            try:
-                rec_list = json.loads(f.recommendation_categories)
-                if isinstance(rec_list, list):
-                    rec_cats = " | ".join(rec_list)
-            except:
-                pass
+        df = pd.DataFrame(data)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="حقول النموذج")
         
-        data.append({
-            "section_name": section_name,
-            "field_key": f.field_key,
-            "label": f.label,
-            "field_type": f.field_type,
-            "is_required": f.is_required,
-            "order": f.order,
-            "options": options,
-            "has_recommendations": f.has_recommendations,
-            "recommendation_categories": rec_cats,
-            "subtitle": f.subtitle or "",
-            "condition": f.condition_json or ""
-        })
-    
-    df = pd.DataFrame(data)
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="حقول النموذج")
-    
-    # تنسيق العمود field_type ليكون قائمة منسدلة
-    from openpyxl import load_workbook
-    from openpyxl.worksheet.datavalidation import DataValidation
-    
-    output.seek(0)
-    wb = load_workbook(output)
-    ws = wb.active
-    
-    # إنشاء قائمة منسدلة لأنواع الحقول
-    field_types = ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "phone", "url"]
-    dv = DataValidation(type="list", formula1=f'"{",".join(field_types)}"', allow_blank=True)
-    dv.error = "يرجى اختيار نوع حقل صحيح من القائمة"
-    dv.errorTitle = "نوع الحقل غير صالح"
-    
-    # تطبيق القائمة المنسدلة على عمود field_type (العمود D) - فقط إذا كانت هناك بيانات
-    if len(data) > 0:
-        col_letter = "D"
-        dv.add(f"{col_letter}2:{col_letter}{len(data)+1}")
-        ws.add_data_validation(dv)
-    
-    # تنسيق العرض
-    ws.column_dimensions['A'].width = 20  # section_name
-    ws.column_dimensions['B'].width = 25  # field_key
-    ws.column_dimensions['C'].width = 30  # label
-    ws.column_dimensions['D'].width = 15  # field_type
-    ws.column_dimensions['E'].width = 12  # is_required
-    ws.column_dimensions['F'].width = 10  # order
-    ws.column_dimensions['G'].width = 40  # options
-    ws.column_dimensions['H'].width = 15  # has_recommendations
-    ws.column_dimensions['I'].width = 30  # recommendation_categories
-    
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    
-    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
-                            headers={"Content-Disposition": "attachment; filename=form_fields.xlsx"})
+        # تنسيق العمود field_type ليكون قائمة منسدلة
+        from openpyxl import load_workbook
+        from openpyxl.worksheet.datavalidation import DataValidation
+        
+        output.seek(0)
+        wb = load_workbook(output)
+        ws = wb.active
+        
+        # إنشاء قائمة منسدلة لأنواع الحقول
+        field_types = ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "phone", "url"]
+        dv = DataValidation(type="list", formula1=f'"{",".join(field_types)}"', allow_blank=True)
+        dv.error = "يرجى اختيار نوع حقل صحيح من القائمة"
+        dv.errorTitle = "نوع الحقل غير صالح"
+        
+        # تطبيق القائمة المنسدلة على عمود field_type (العمود D) - فقط إذا كانت هناك بيانات
+        if len(data) > 0:
+            col_letter = "D"
+            dv.add(f"{col_letter}2:{col_letter}{len(data)+1}")
+            ws.add_data_validation(dv)
+        
+        # تنسيق العرض
+        ws.column_dimensions['A'].width = 20  # section_name
+        ws.column_dimensions['B'].width = 25  # field_key
+        ws.column_dimensions['C'].width = 30  # label
+        ws.column_dimensions['D'].width = 15  # field_type
+        ws.column_dimensions['E'].width = 12  # is_required
+        ws.column_dimensions['F'].width = 10  # order
+        ws.column_dimensions['G'].width = 40  # options
+        ws.column_dimensions['H'].width = 15  # has_recommendations
+        ws.column_dimensions['I'].width = 30  # recommendation_categories
+        
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                                headers={"Content-Disposition": "attachment; filename=form_fields.xlsx"})
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error in export_form_fields: {error_details}")
+        raise HTTPException(500, f"خطأ في التصدير: {str(e)}")
 
 @app.post("/admin/form-fields/import")
 async def import_form_fields(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value)), file: UploadFile = File(...)):
