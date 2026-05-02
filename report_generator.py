@@ -45,9 +45,9 @@ def format_date_only(value):
         return str(value)
 
 
-def _add_title(doc, text, size):
+def _add_title(doc, text, size, align=WD_ALIGN_PARAGRAPH.JUSTIFY):
     p = doc.add_paragraph()
-    set_rtl_and_justify(p)
+    set_rtl_and_justify(p, align)
     set_font_style(p.add_run(text), size=size, bold=True)
     return p
 
@@ -81,10 +81,12 @@ def build_web_report(data: dict, output_folder: str) -> str:
 
     doc = Document()
 
+    # ─── عنوان التقرير ───────────────────────────────────────────────
     p_subj = doc.add_paragraph()
     set_rtl_and_justify(p_subj, WD_ALIGN_PARAGRAPH.CENTER)
     set_font_style(p_subj.add_run("م/ زيارة تفتيشية"), size=18, bold=True)
 
+    # ─── المقدمة ─────────────────────────────────────────────────────
     intro_text = (
         f"استناداً إلى الخطة السنوية لشعبة تفتيش المؤسسات الصحية الحكومية، "
         f"أجرى فريق من قسم التفتيش زيارة تفتيشية الى ({inst}) بتاريخ ({format_date_only(date)})"
@@ -99,37 +101,67 @@ def build_web_report(data: dict, output_folder: str) -> str:
     set_font_style(p_note.add_run("وتم ملاحظة الاتي :"), size=12, bold=True)
     doc.add_paragraph(" ")
 
-    # Add general information fields without the "المعلومات العامة:" title
+    # ─── المعلومات العامة ────────────────────────────────────────────
     for label, value in general.items():
         if label in ["institution", "visit_date"]:
             continue
         _add_field(doc, label, value)
     doc.add_paragraph(" ")
 
+    # ─── الأقسام ─────────────────────────────────────────────────────
+    # الهيكل المتوقع في data["sections"]:
+    #   { section_id: { "name", "order", "data": [...], "subsections": { subsec_id: { "name", "order", "data": [...] } } } }
+    #
+    # المطلوب في التقرير:
+    #   اسم القسم الرئيسي (كبير)
+    #     اسم القسم الفرعي الأول (متوسط)
+    #       إجابات القسم الفرعي الأول
+    #     اسم القسم الفرعي الثاني (متوسط)
+    #       إجابات القسم الفرعي الثاني
+    #   (وهكذا)
+
     sections = data.get("sections", {})
+
     for _, section in sorted(sections.items(), key=lambda item: item[1].get("order", 0)):
         section_data = sorted(section.get("data", []), key=lambda item: item.get("order", 0))
-        subsections = sorted(section.get("subsections", {}).items(), key=lambda item: item[1].get("order", 0))
-        if not section_data and not subsections:
+        subsections = sorted(
+            section.get("subsections", {}).items(),
+            key=lambda item: item[1].get("order", 0)
+        )
+
+        # تحقق هل يوجد بيانات فعلية لهذا القسم أو أقسامه الفرعية
+        has_any_data = bool(section_data) or any(
+            sub.get("data") for _, sub in subsections
+        )
+        if not has_any_data:
             continue
 
-        # Add section name as main title
+        # ① اسم القسم الرئيسي
         _add_title(doc, section.get("name", "محور"), 16)
-        
-        # Add section-level data directly under section name
+
+        # ② بيانات القسم الرئيسي مباشرةً (إن وُجدت)
         for item in section_data:
             _add_field(doc, item.get("label", ""), item.get("value", ""))
 
-        # Add subsections with their data - just the answers without labels
+        # ③ الأقسام الفرعية
         for _, subsection in subsections:
-            subsection_data = sorted(subsection.get("data", []), key=lambda item: item.get("order", 0))
+            subsection_data = sorted(
+                subsection.get("data", []),
+                key=lambda item: item.get("order", 0)
+            )
             if not subsection_data:
                 continue
-            # Add data under subsection without labels (just the values)
+
+            # اسم القسم الفرعي
+            _add_title(doc, subsection.get("name", ""), 14)
+
+            # إجابات القسم الفرعي (القيمة فقط بدون عنوان الحقل)
             for item in subsection_data:
                 _add_field_no_label(doc, item.get("value", ""))
+
         doc.add_paragraph(" ")
 
+    # ─── التوصيات ────────────────────────────────────────────────────
     recommendations = data.get("recommendations", {})
     rec_categories = data.get("recommendation_categories") or [
         {"key": "rec_a", "label": "أ/ الإيعاز إلى دائرة صحة بغداد الرصافة/ قسم التخطيط:"},
@@ -138,24 +170,35 @@ def build_web_report(data: dict, output_folder: str) -> str:
         {"key": "rec_d", "label": "د/ أخرى:"},
     ]
 
-    has_recommendations = any(recommendations.get(cat["key"]) for cat in rec_categories)
+    has_recommendations = any(
+        recommendations.get(cat["key"]) for cat in rec_categories
+    )
+
     if has_recommendations:
-        # Add page break before recommendations
+        # ① صفحة جديدة
         doc.add_page_break()
-        _add_title(doc, "التوصيات:", 16)
+
+        # ② عنوان "التوصيات:" في أعلى الصفحة الجديدة
+        _add_title(doc, "التوصيات:", 16, align=WD_ALIGN_PARAGRAPH.JUSTIFY)
+        doc.add_paragraph(" ")
+
         for cat in rec_categories:
             items = [item for item in recommendations.get(cat["key"], []) if str(item).strip()]
             if not items:
                 continue
-            # Add sub-title (e.g., أ/, ب/, etc.) - just the letter with slash
-            sub_title = cat["label"].split("/")[0].strip() + "/"
-            _add_title(doc, sub_title, 14)
-            # Add numbered list for recommendations under each sub-title
+
+            # ③ العنوان الفرعي (الحرف فقط مثل: أ/ أو ب/)
+            # نعرض النص الكامل للفئة (label) دون اسم القسم التابعة له
+            sub_label = cat["label"]   # مثال: "أ/ الإيعاز إلى دائرة صحة بغداد الرصافة/ قسم التخطيط:"
+            _add_title(doc, sub_label, 13)
+
+            # ④ الإجابات كقائمة مرقمة بدون اسم القسم
             for idx, item in enumerate(items, start=1):
                 p = doc.add_paragraph()
                 set_rtl_and_justify(p)
                 set_font_style(p.add_run(f"{idx}. "), size=12, bold=True)
                 set_font_style(p.add_run(str(item).strip()), size=12)
+
             doc.add_paragraph(" ")
 
     doc.save(path)
