@@ -1,4 +1,22 @@
 ```
-__pycache__/
+# Compiled Python files
 *.pyc
+__pycache__/
+
+# Logs and temporary files
+*.log
+server.log
+*.tmp
+
+# Environment and config files
+.env
+.env.local
+*.env.*
+
+# Database files
+*.db
+inspection.db
+
+# Cookies and session data
+cookies.txt
 ```

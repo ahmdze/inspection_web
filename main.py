@@ -29,7 +29,7 @@ app.include_router(inspector_router)
 
 def hash_password(pw: str) -> str: return encrypt_password(pw)
 
-def message_page(title: str, message: str, status_code: int = 200, back_url: str = "/dashboard", kind: str = "info"):
+def message_page(title: str, message: str, status_code: int = 200, back_url: str = "/dashboard", kind: str = "info", allow_html: bool = False):
     colors = {
         "success": ("green", "✅"),
         "error": ("red", "⚠️"),
@@ -37,12 +37,13 @@ def message_page(title: str, message: str, status_code: int = 200, back_url: str
         "info": ("blue", "ℹ️"),
     }
     color, icon = colors.get(kind, colors["info"])
+    message_content = message if allow_html else html.escape(str(message))
     return HTMLResponse(f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
     <div class="bg-white max-w-md w-full p-6 rounded-lg shadow text-center border-t-4 border-{color}-500">
       <div class="text-4xl mb-3">{icon}</div>
       <h1 class="text-2xl font-bold text-{color}-700 mb-3">{html.escape(str(title))}</h1>
-      <p class="text-gray-700 leading-7 mb-6">{html.escape(str(message))}</p>
+      <p class="text-gray-700 leading-7 mb-6">{message_content}</p>
       <a href="{html.escape(back_url)}" class="inline-block bg-{color}-600 hover:bg-{color}-700 text-white px-6 py-2 rounded">العودة</a>
     </div></body></html>""", status_code=status_code)
 
@@ -59,7 +60,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     referer = request.headers.get("referer") or request.headers.get("Referer")
     back_url = referer if referer else "/dashboard"
-    return message_page("بيانات غير مكتملة", "تأكد من تعبئة الحقول المطلوبة ثم حاول مرة أخرى.", 422, back_url, "warning")
+    # عرض تفاصيل الخطأ للتطوير
+    errors_detail = exc.errors()
+    error_messages = [f"{e.get('loc', [])}: {e.get('msg', '')}" for e in errors_detail]
+    return message_page("بيانات غير مكتملة", f"تأكد من تعبئة الحقول المطلوبة ثم حاول مرة أخرى.<br><small class='text-xs text-red-500'>تفاصيل الخطأ: {html.escape(str(error_messages))}</small>", 422, back_url, "warning", allow_html=True)
 def format_date(date_str):
     """تحويل التاريخ من YYYY-MM-DD إلى DD/MM/YYYY"""
     try:
