@@ -88,7 +88,7 @@ def build_web_report(data: dict, output_folder: str) -> str:
     set_font_style(p_note.add_run("وتم ملاحظة الاتي :"), size=12, bold=True)
     doc.add_paragraph(" ")
 
-    _add_title(doc, "المعلومات العامة:", 16)
+    # Add general information fields without the "المعلومات العامة:" title
     for label, value in general.items():
         if label in ["institution", "visit_date"]:
             continue
@@ -102,15 +102,21 @@ def build_web_report(data: dict, output_folder: str) -> str:
         if not section_data and not subsections:
             continue
 
+        # Add section name as main title
         _add_title(doc, section.get("name", "محور"), 16)
+        
+        # Add section-level data directly under section name
         for item in section_data:
             _add_field(doc, item.get("label", ""), item.get("value", ""))
 
+        # Add subsections with their data
         for _, subsection in subsections:
             subsection_data = sorted(subsection.get("data", []), key=lambda item: item.get("order", 0))
             if not subsection_data:
                 continue
+            # Add subsection name
             _add_title(doc, subsection.get("name", "قسم"), 14)
+            # Add data under subsection
             for item in subsection_data:
                 _add_field(doc, item.get("label", ""), item.get("value", ""))
         doc.add_paragraph(" ")
@@ -125,12 +131,16 @@ def build_web_report(data: dict, output_folder: str) -> str:
 
     has_recommendations = any(recommendations.get(cat["key"]) for cat in rec_categories)
     if has_recommendations:
+        # Add page break before recommendations
+        doc.add_page_break()
         _add_title(doc, "التوصيات:", 16)
         for cat in rec_categories:
             items = [item for item in recommendations.get(cat["key"], []) if str(item).strip()]
             if not items:
                 continue
-            _add_title(doc, cat["label"], 14)
+            # Add sub-title (e.g., أ/, ب/, etc.) without the category description
+            sub_title = cat["label"].split(":")[0] + ":"
+            _add_title(doc, sub_title, 14)
             for item in items:
                 p = doc.add_paragraph()
                 set_rtl_and_justify(p)
