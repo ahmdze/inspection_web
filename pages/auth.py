@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from password_utils import encrypt_password, verify_password
+import html
 
 router = APIRouter()
 
@@ -33,13 +34,24 @@ def get_current_user(request: Request, db: Session):
     return user
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+async def login_page(request: Request):
+    from urllib.parse import quote
+    # الحصول على الصفحة المطلوبة لإعادة التوجيه بعد تسجيل الدخول
+    next_url = request.query_params.get("next", "/dashboard")
+    
+    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
     <div class="max-w-md mx-auto bg-white p-6 rounded shadow mt-10">
     <h1 class="text-2xl font-bold text-blue-800 mb-2 text-center">نظام التفتيش الذكي المتقدم</h1>
     <p class="text-gray-500 text-center mb-4">إصدار 1.0</p>
+    
+    <!-- رسالة الخطأ -->
+    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4 text-center">
+      <p class="font-bold">⚠️ حدث خطأ يجب تسجيل الدخول</p>
+    </div>
+    
     <form action="/login" method="post" class="space-y-4">
+    <input type="hidden" name="next" value="{html.escape(next_url)}">
     <input name="username" placeholder="اسم المستخدم" required class="w-full p-2 border rounded">
     <input name="password" type="password" placeholder="كلمة المرور" required class="w-full p-2 border rounded">
     <div class="flex items-center">
@@ -78,13 +90,13 @@ async def login_page():
     </div>
     
     <script>
-    function showAbout() { document.getElementById('about-modal').classList.remove('hidden'); }
-    function closeAbout() { document.getElementById('about-modal').classList.add('hidden'); }
+    function showAbout() {{ document.getElementById('about-modal').classList.remove('hidden'); }}
+    function closeAbout() {{ document.getElementById('about-modal').classList.add('hidden'); }}
     </script>
     </body></html>"""
 
 @router.post("/login")
-async def login(request: Request, db: Session = Depends(get_db), username: str = Form(...), password: str = Form(...)):
+async def login(request: Request, db: Session = Depends(get_db), username: str = Form(...), password: str = Form(...), next: str = Form("/dashboard")):
     from database import User, AuditLog
     from datetime import datetime
     from itsdangerous import URLSafeTimedSerializer
@@ -96,7 +108,9 @@ async def login(request: Request, db: Session = Depends(get_db), username: str =
     if not user.is_active:
         raise HTTPException(401, "الحساب معلق بانتظار موافقة المدير")
     token = serializer.dumps(user.id)
-    resp = RedirectResponse(url="/dashboard", status_code=302)
+    # إعادة التوجيه إلى الصفحة المطلوبة بعد تسجيل الدخول
+    redirect_url = next if next else "/dashboard"
+    resp = RedirectResponse(url=redirect_url, status_code=302)
     resp.set_cookie("session_token", token, httponly=True, max_age=86400)
     
     # تسجيل الإجراء

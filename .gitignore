@@ -1,1 +1,11 @@
-Nothing should be ignored based on the provided file changes. The modified files (`pages/inspector.py` and `static/offline.js`) are source code files that should not be added to .gitignore. Since there are no build artifacts, dependencies, or temporary files in the changes, no additional ignore rules are needed.
+```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+*.log
+server.log
+```
