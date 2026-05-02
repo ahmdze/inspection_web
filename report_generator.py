@@ -55,8 +55,19 @@ def _add_title(doc, text, size):
 def _add_field(doc, label, value):
     p = doc.add_paragraph()
     set_rtl_and_justify(p)
-    set_font_style(p.add_run(f"{label}: "), size=12, bold=True)
-    set_font_style(p.add_run(clean_numeric_value(value)), size=12)
+    run_label = p.add_run(f"{label}: ")
+    set_font_style(run_label, size=12, bold=True)
+    run_value = p.add_run(clean_numeric_value(value))
+    set_font_style(run_value, size=12)
+    return p
+
+
+def _add_field_no_label(doc, value):
+    """Add a paragraph with just the value, no label prefix"""
+    p = doc.add_paragraph()
+    set_rtl_and_justify(p)
+    run_value = p.add_run(clean_numeric_value(value))
+    set_font_style(run_value, size=12)
     return p
 
 
@@ -109,16 +120,14 @@ def build_web_report(data: dict, output_folder: str) -> str:
         for item in section_data:
             _add_field(doc, item.get("label", ""), item.get("value", ""))
 
-        # Add subsections with their data
+        # Add subsections with their data - just the answers without labels
         for _, subsection in subsections:
             subsection_data = sorted(subsection.get("data", []), key=lambda item: item.get("order", 0))
             if not subsection_data:
                 continue
-            # Add subsection name
-            _add_title(doc, subsection.get("name", "قسم"), 14)
-            # Add data under subsection
+            # Add data under subsection without labels (just the values)
             for item in subsection_data:
-                _add_field(doc, item.get("label", ""), item.get("value", ""))
+                _add_field_no_label(doc, item.get("value", ""))
         doc.add_paragraph(" ")
 
     recommendations = data.get("recommendations", {})
@@ -138,8 +147,8 @@ def build_web_report(data: dict, output_folder: str) -> str:
             items = [item for item in recommendations.get(cat["key"], []) if str(item).strip()]
             if not items:
                 continue
-            # Add sub-title (e.g., أ/, ب/, etc.) without the category description
-            sub_title = cat["label"].split(":")[0] + ":"
+            # Add sub-title (e.g., أ/, ب/, etc.) - just the letter with slash
+            sub_title = cat["label"].split("/")[0].strip() + "/"
             _add_title(doc, sub_title, 14)
             # Add numbered list for recommendations under each sub-title
             for idx, item in enumerate(items, start=1):
