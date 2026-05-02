@@ -1,8 +1,17 @@
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 router = APIRouter()
+
+def format_date(date_str):
+    """تحويل التاريخ من YYYY-MM-DD إلى DD/MM/YYYY"""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%d/%m/%Y")
+    except:
+        return date_str
 
 def get_db():
     from database import SessionLocal
@@ -33,7 +42,7 @@ async def admin_panel(request: Request, db: Session = Depends(get_db)):
     from database import InspectionSession, FormTemplate
     
     user = get_current_user(request, db)
-    if user.role not in ["admin", "supervisor"]:
+    if user.role not in ["admin"]:
         raise HTTPException(403, "صلاحية غير كافية")
     
     sessions = db.query(InspectionSession).order_by(InspectionSession.created_at.desc()).all()
@@ -53,11 +62,11 @@ async def admin_panel(request: Request, db: Session = Depends(get_db)):
       <form action="/logout" method="post"><button class="bg-red-500 text-white px-3 py-1 rounded text-sm">خروج</button></form></div>"""
     
     rows = "".join(f'''<li class="border p-3 rounded flex justify-between items-center bg-white mb-2">
-      <div><span class="font-bold">{s.institution}</span> | {s.visit_date}
+      <div><span class="font-bold">{s.institution}</span> | {format_date(s.visit_date)}
       <div class="text-sm text-gray-500 mt-1">الرمز: <code class="bg-gray-100 px-1">{s.session_code}</code></div></div>
       <div class="flex gap-2">
         <a href="/admin/session/{s.id}" class="bg-blue-600 text-white px-3 py-1 rounded text-sm">عرض وتوليد</a>
-        <button onclick="copySessionLink('{request.url.scheme}://{request.headers.get("host", "")}/inspect/{s.session_code}')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">📋 نسخ الرابط</button>
+        <button onclick="copyAndShareSession('{request.url.scheme}://{request.headers.get("host", "")}/inspect/{s.session_code}')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">📋 نسخ ومشاركة</button>
       </div></li>''' for s in sessions)
     
     template_options = "".join(f'<option value="{t.id}">{t.name}</option>' for t in templates)
@@ -73,15 +82,38 @@ async def admin_panel(request: Request, db: Session = Depends(get_db)):
         <button class="bg-green-600 text-white p-2 rounded">إنشاء + مشاركة الرابط</button></form></div>
     <div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-3">📋 الجولات النشطة</h2><ul class="space-y-2">{rows}</ul></div></div>
     <script>
-    function copySessionLink(url) {{
-      navigator.clipboard.writeText(url).then(() => {{
-        alert('تم نسخ رابط الجولة!');
-      }}).catch(err => {{
-        prompt('انسخ الرابط يدوياً:', url);
-      }});
+    async function copyAndShareSession(url) {{
+      // أولاً: نسخ الرابط
+      try {{
+        await navigator.clipboard.writeText(url);
+      }} catch(err) {{}}
+      
+      // ثانياً: فتح نافذة المشاركة
+      if (navigator.share) {{
+        try {{
+          await navigator.share({{
+            title: 'جولة تفتيش',
+            text: 'رابط جولة التفتيش: ' + url,
+            url: url
+          }});
+        }} catch(err) {{
+          // تم إلغاء المشاركة أو فشل، لكن النسخ تم بالفعل
+        }}
+      }} else {{
+        // إذا كان المتصفح لا يدعم المشاركة، نعرض رسالة تأكيد النسخ
+        showToast('✅ تم نسخ الرابط! يمكنك الآن لصقه في أي مكان.');
+      }}
+    }}
+    
+    function showToast(message) {{
+      const toast = document.createElement('div');
+      toast.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-bounce';
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
     }}
     </script>
-    </body></html>"""
+    </body></html>""".replace("{format_date(s.visit_date)}", format_date(s.visit_date))
 
 @router.post("/admin/create")
 async def create_session(request: Request, db: Session = Depends(get_db),
@@ -90,7 +122,7 @@ async def create_session(request: Request, db: Session = Depends(get_db),
     from datetime import datetime
     
     user = get_current_user(request, db)
-    if user.role not in ["admin", "supervisor"]:
+    if user.role not in ["admin"]:
         raise HTTPException(403, "صلاحية غير كافية")
     
     # حفظ الجلسة مع ربطها بالنموذج المختار إن وُجد

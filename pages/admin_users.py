@@ -72,7 +72,7 @@ async def admin_users(request: Request, db: Session = Depends(get_db)):
     <form action="/admin/users" method="post" class="bg-gray-50 p-4 rounded mb-6 grid grid-cols-2 md:grid-cols-4 gap-2">
       <input name="username" placeholder="اسم المستخدم" required class="p-2 border rounded">
       <input name="password" type="password" placeholder="كلمة المرور" required class="p-2 border rounded">
-      <select name="role" class="p-2 border rounded"><option value="supervisor">مشرف</option><option value="inspector">مفتش</option><option value="admin">مدير</option></select>
+      <select name="role" class="p-2 border rounded"><option value="inspector">مفتش</option><option value="admin">مدير</option></select>
       <button class="bg-green-600 text-white p-2 rounded">➕ إضافة</button></form>
     <table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الاسم</th><th>الدور</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></body></html>"""
 
@@ -150,7 +150,7 @@ async def edit_user_page(uid: int, request: Request, db: Session = Depends(get_d
     <form action="/admin/users/{uid}/edit" method="post" class="space-y-3">
       <input name="username" value="{u.username}" required class="w-full p-2 border rounded">
       <input name="password" type="password" placeholder="اتركه فارغاً إذا لم ترد تغييره" class="w-full p-2 border rounded">
-      <select name="role" class="w-full p-2 border rounded"><option value="supervisor" {'selected' if u.role=='supervisor' else ''}>مشرف</option><option value="inspector" {'selected' if u.role=='inspector' else ''}>مفتش</option><option value="admin" {'selected' if u.role=='admin' else ''}>مدير</option></select>
+      <select name="role" class="w-full p-2 border rounded"><option value="inspector" {'selected' if u.role=='inspector' else ''}>مفتش</option><option value="admin" {'selected' if u.role=='admin' else ''}>مدير</option></select>
       <button class="w-full bg-blue-600 text-white py-2 rounded">💾 حفظ</button></form><a href="/admin/users" class="block text-center mt-4 text-gray-500">← إلغاء</a></div></body></html>"""
 
 @router.post("/admin/users/{uid}/edit")
@@ -195,7 +195,15 @@ async def export_users(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(403, "صلاحية غير كافية")
     
     users = db.query(User).all()
-    data = [{"username": u.username, "password": "123456", "role": u.role, "is_active": u.is_active} for u in users]
+    # تصدير كلمات المرور كما هي (بدون تشفير) - ستظهر في الملف
+    data = []
+    for u in users:
+        data.append({
+            "username": u.username, 
+            "password": u.password_hash,  # كلمة المرور المشفرة كما هي في قاعدة البيانات
+            "role": u.role, 
+            "is_active": u.is_active
+        })
     df = pd.DataFrame(data)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -233,8 +241,8 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
             is_active = row.get("is_active", True)
             password = str(row.get("password", "")).strip()
             
-            # التحقق من صحة الدور
-            if role not in ["admin", "supervisor", "inspector"]:
+            # التحقق من صحة الدور - حذف المشرف
+            if role not in ["admin", "inspector"]:
                 role = "inspector"
             
             existing = db.query(User).filter(User.username == username).first()
@@ -243,12 +251,12 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
                 existing.role = role
                 if pd.notna(is_active):
                     existing.is_active = bool(is_active)
-                # تحديث كلمة المرور إذا كانت موجودة في الملف
+                # تحديث كلمة المرور إذا كانت موجودة في الملف (تشفيرها قبل الحفظ)
                 if password:
                     existing.password_hash = hash_password(password)
                 count_updated += 1
             else:
-                # إنشاء مستخدم جديد بكلمة مرور من الملف أو افتراضية
+                # إنشاء مستخدم جديد بكلمة مرور من الملف أو افتراضية (مع التشفير)
                 new_password = password if password else "123456"
                 db.add(User(username=username, password_hash=hash_password(new_password), role=role))
                 count_created += 1
