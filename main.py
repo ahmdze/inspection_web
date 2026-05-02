@@ -154,7 +154,8 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
     <script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-50 p-4"><div class="max-w-4xl mx-auto bg-white p-6 rounded shadow">
       <div class="flex justify-between items-center mb-4"><h1 class="text-xl font-bold">🛠️ باني الاستمارة</h1>
-      <div class="flex gap-2"><button onclick="showSaveModal()" class="bg-green-600 text-white px-4 py-2 rounded text-sm">💾 حفظ كنموذج</button><a href="/admin/panel" class="text-blue-600">← العودة</a></div></div>
+      <div class="flex gap-2"><a href="/admin/form-fields/export" class="bg-purple-600 text-white px-4 py-2 rounded text-sm">📤 تصدير الحقول</a><button onclick="document.getElementById('importFile').click()" class="bg-indigo-600 text-white px-4 py-2 rounded text-sm">📥 استيراد حقول</button><button onclick="showSaveModal()" class="bg-green-600 text-white px-4 py-2 rounded text-sm">💾 حفظ كنموذج</button><a href="/admin/panel" class="text-blue-600">← العودة</a></div></div>
+      <input type="file" id="importFile" accept=".xlsx,.xls" style="display:none" onchange="handleImport(this)">
       {edit_save_bar}
       {sections_html}</div></div>
     <div id="saveModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -168,6 +169,24 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
     <script>
       function showSaveModal() {{ document.getElementById('saveModal').classList.remove('hidden'); }}
       function closeSaveModal() {{ document.getElementById('saveModal').classList.add('hidden'); }}
+      async function handleImport(input) {{
+        const file = input.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('file', file);
+        try {{
+          const res = await fetch('/admin/form-fields/import', {{ method: 'POST', body: formData }});
+          const data = await res.json();
+          if (data.success) {{
+            alert('✅ تم استيراد ' + data.count + ' حقل بنجاح!');
+            window.location.reload();
+          }} else {{
+            alert('❌ خطأ: ' + data.error);
+          }}
+        }} catch(err) {{
+          alert('❌ خطأ في الاتصال: ' + err.message);
+        }}
+      }}
     </script></body></html>"""
 
 @app.get("/admin/form-field/new", response_class=HTMLResponse)
@@ -236,7 +255,10 @@ def _render_field_form(field, section_id, section_name, db, edit_template_id=Non
       <select name="field_type" class="w-full p-2 border rounded">
         <option {'selected' if vals['field_type']=='text' else ''}>text</option><option {'selected' if vals['field_type']=='textarea' else ''}>textarea</option>
         <option {'selected' if vals['field_type']=='number' else ''}>number</option><option {'selected' if vals['field_type']=='date' else ''}>date</option>
-        <option {'selected' if vals['field_type']=='select' else ''}>select</option></select>
+        <option {'selected' if vals['field_type']=='select' else ''}>select</option><option {'selected' if vals['field_type']=='checkbox' else ''}>checkbox</option>
+        <option {'selected' if vals['field_type']=='radio' else ''}>radio</option><option {'selected' if vals['field_type']=='email' else ''}>email</option>
+        <option {'selected' if vals['field_type']=='phone' else ''}>phone</option><option {'selected' if vals['field_type']=='url' else ''}>url</option>
+      </select>
       <input name="order" type="number" value="{vals['order']}" class="w-full p-2 border rounded">
       <div><label class="flex gap-2 items-center"><input type="checkbox" name="is_required" {'checked' if vals.get('is_required') else ''} class="rounded"> <span>مطلوب</span></label></div>
       <div id="opts-container" class="{'hidden' if vals['field_type']!='select' else ''} bg-blue-50 p-3 rounded border">
@@ -1182,6 +1204,223 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
         raise
     except Exception as e:
         raise HTTPException(500, f"خطأ في الاستيراد: {str(e)}")
+
+# ================== تصدير واستيراد حقول النموذج ==================
+@app.get("/admin/form-fields/export")
+async def export_form_fields(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    """تصدير جميع الحقول إلى ملف Excel"""
+    fields = db.query(FormField).filter(FormField.is_active == True).order_by(FormField.section_id, FormField.order).all()
+    
+    data = []
+    for f in fields:
+        section = db.query(Section).filter(Section.id == f.section_id).first() if f.section_id else None
+        section_name = section.name if section else ""
+        
+        # استخراج الخيارات كقائمة مفصولة بفواصل
+        options = ""
+        if f.options_json:
+            try:
+                opts_list = json.loads(f.options_json)
+                if isinstance(opts_list, list):
+                    options = " | ".join(opts_list)
+            except:
+                pass
+        
+        # استخراج فئات التوصيات
+        rec_cats = ""
+        if f.has_recommendations and f.recommendation_categories:
+            try:
+                rec_list = json.loads(f.recommendation_categories)
+                if isinstance(rec_list, list):
+                    rec_cats = " | ".join(rec_list)
+            except:
+                pass
+        
+        data.append({
+            "section_name": section_name,
+            "field_key": f.field_key,
+            "label": f.label,
+            "field_type": f.field_type,
+            "is_required": f.is_required,
+            "order": f.order,
+            "options": options,
+            "has_recommendations": f.has_recommendations,
+            "recommendation_categories": rec_cats,
+            "subtitle": f.subtitle or "",
+            "condition": f.condition_json or ""
+        })
+    
+    df = pd.DataFrame(data)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="حقول النموذج")
+    
+    # تنسيق العمود field_type ليكون قائمة منسدلة
+    from openpyxl import load_workbook
+    from openpyxl.worksheet.datavalidation import DataValidation
+    
+    output.seek(0)
+    wb = load_workbook(output)
+    ws = wb.active
+    
+    # إنشاء قائمة منسدلة لأنواع الحقول
+    field_types = ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "phone", "url"]
+    dv = DataValidation(type="list", formula1=f'"{",".join(field_types)}"', allow_blank=True)
+    dv.error = "يرجى اختيار نوع حقل صحيح من القائمة"
+    dv.errorTitle = "نوع الحقل غير صالح"
+    
+    # تطبيق القائمة المنسدلة على عمود field_type (العمود D)
+    col_letter = "D"
+    dv.add(f"{col_letter}2:{col_letter}{len(data)+1}")
+    ws.add_data_validation(dv)
+    
+    # تنسيق العرض
+    ws.column_dimensions['A'].width = 20  # section_name
+    ws.column_dimensions['B'].width = 25  # field_key
+    ws.column_dimensions['C'].width = 30  # label
+    ws.column_dimensions['D'].width = 15  # field_type
+    ws.column_dimensions['E'].width = 12  # is_required
+    ws.column_dimensions['F'].width = 10  # order
+    ws.column_dimensions['G'].width = 40  # options
+    ws.column_dimensions['H'].width = 15  # has_recommendations
+    ws.column_dimensions['I'].width = 30  # recommendation_categories
+    
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                            headers={"Content-Disposition": "attachment; filename=form_fields.xlsx"})
+
+@app.post("/admin/form-fields/import")
+async def import_form_fields(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value)), file: UploadFile = File(...)):
+    """استيراد الحقول من ملف Excel"""
+    try:
+        contents = await file.read()
+        df = pd.read_excel(io.BytesIO(contents))
+        
+        # التحقق من الأعمدة المطلوبة
+        required_cols = ["field_key", "label", "field_type"]
+        if not all(col in df.columns for col in required_cols):
+            return {"success": False, "error": "يجب أن يحتوي الملف على أعمدة: field_key, label, field_type"}
+        
+        count_created = 0
+        count_updated = 0
+        count_errors = 0
+        errors = []
+        
+        valid_field_types = ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "phone", "url"]
+        
+        for idx, row in df.iterrows():
+            try:
+                field_key = str(row["field_key"]).strip()
+                label = str(row["label"]).strip()
+                field_type = str(row.get("field_type", "text")).strip().lower()
+                
+                # التحقق من صحة نوع الحقل
+                if field_type not in valid_field_types:
+                    field_type = "text"
+                
+                section_name = str(row.get("section_name", "")).strip() if pd.notna(row.get("section_name")) else ""
+                is_required = bool(row.get("is_required", False))
+                order = int(row.get("order", 1)) if pd.notna(row.get("order")) else 1
+                subtitle = str(row.get("subtitle", "")).strip() if pd.notna(row.get("subtitle")) else ""
+                has_recommendations = bool(row.get("has_recommendations", False))
+                
+                # معالجة الخيارات
+                options_json = None
+                if pd.notna(row.get("options")) and str(row.get("options")).strip():
+                    opts_str = str(row.get("options")).strip()
+                    opts_list = [o.strip() for o in opts_str.split("|") if o.strip()]
+                    if opts_list:
+                        options_json = json.dumps(opts_list)
+                
+                # معالجة فئات التوصيات
+                rec_categories_json = None
+                if has_recommendations and pd.notna(row.get("recommendation_categories")) and str(row.get("recommendation_categories")).strip():
+                    rec_str = str(row.get("recommendation_categories")).strip()
+                    rec_list = [r.strip() for r in rec_str.split("|") if r.strip()]
+                    if rec_list:
+                        rec_categories_json = json.dumps(rec_list)
+                
+                # معالجة الشرط
+                condition_json = None
+                if pd.notna(row.get("condition")) and str(row.get("condition")).strip():
+                    condition_json = str(row.get("condition")).strip()
+                
+                # البحث عن القسم
+                section_id = None
+                if section_name:
+                    section = db.query(Section).filter(Section.name == section_name).first()
+                    if section:
+                        section_id = section.id
+                
+                # التحقق مما إذا كان الحقل موجوداً
+                existing = db.query(FormField).filter(FormField.field_key == field_key).first()
+                if existing:
+                    # تحديث الحقل الموجود
+                    existing.label = label
+                    existing.field_type = field_type
+                    existing.order = order
+                    existing.options_json = options_json
+                    existing.is_required = is_required
+                    existing.has_recommendations = has_recommendations
+                    existing.recommendation_categories = rec_categories_json
+                    existing.subtitle = subtitle
+                    existing.condition_json = condition_json
+                    if section_id:
+                        existing.section_id = section_id
+                    count_updated += 1
+                else:
+                    # إنشاء حقل جديد
+                    if not section_id:
+                        # إذا لم يتم تحديد قسم، نستخدم أول قسم متاح
+                        first_section = db.query(Section).order_by(Section.order).first()
+                        if first_section:
+                            section_id = first_section.id
+                        else:
+                            errors.append(f"الحقل {field_key}: لا يوجد قسم محدد")
+                            count_errors += 1
+                            continue
+                    
+                    new_field = FormField(
+                        section_id=section_id,
+                        field_key=field_key,
+                        label=label,
+                        field_type=field_type,
+                        order=order,
+                        options_json=options_json,
+                        is_required=is_required,
+                        has_recommendations=has_recommendations,
+                        recommendation_categories=rec_categories_json,
+                        subtitle=subtitle,
+                        condition_json=condition_json
+                    )
+                    db.add(new_field)
+                    count_created += 1
+                    
+            except Exception as e:
+                errors.append(f"صف {idx + 2}: {str(e)}")
+                count_errors += 1
+                continue
+        
+        db.commit()
+        log_action(user.id, "IMPORT_FORM_FIELDS", f"تم استيراد {count_created} حقل جديد وتحديث {count_updated}", request.headers.get("x-forwarded-for", request.client.host))
+        
+        error_msg = f"<br>⚠️ أخطاء: {count_errors}<br>" + "<br>".join(errors[:10]) if errors else ""
+        
+        return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script></head>
+        <body class="bg-gray-50 p-4 flex items-center justify-center h-screen">
+        <div class="bg-white p-8 rounded shadow text-center max-w-lg">
+        <h1 class="text-2xl font-bold text-green-600 mb-4">✅ تم استيراد الحقول بنجاح</h1>
+        <p class="mb-4">📥 حقول جديدة: {count_created}<br>🔄 تم التحديث: {count_updated}{error_msg}</p>
+        <a href="/admin/form-builder" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة لباني النموذج</a>
+        </div></body></html>"""
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"success": False, "error": f"خطأ في الاستيراد: {str(e)}"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
