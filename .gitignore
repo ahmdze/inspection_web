@@ -1,4 +1,33 @@
 ```
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Database
+inspection.db
+
+# Dependencies
+.venv/
+venv/
+pip-log.txt
+pip-selfcheck.json
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Coverage reports
+.coverage
+htmlcov/
+.coverage.*
+.cache
+
+# Environment
+.env
+.env.local
+.env.*
+.env~*
 ```
