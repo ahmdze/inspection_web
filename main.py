@@ -1108,7 +1108,7 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value))
 @app.get("/admin/users/export")
 async def export_users(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     users = db.query(User).all()
-    data = [{"username": u.username, "password": export_password(u.password_hash), "role": u.role, "is_active": u.is_active} for u in users]
+    data = [{"username": u.username, "job_title": u.job_title or "", "email": u.email or "", "phone": u.phone or "", "password": export_password(u.password_hash), "role": u.role, "is_active": u.is_active} for u in users]
     df = pd.DataFrame(data)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -1133,6 +1133,9 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
         for _, row in df.iterrows():
             username = str(row["username"]).strip()
             role = str(row.get("role", "inspector")).strip()
+            email = "" if pd.isna(row.get("email", "")) else str(row.get("email", "")).strip()
+            phone = "" if pd.isna(row.get("phone", "")) else str(row.get("phone", "")).strip()
+            job_title = "" if pd.isna(row.get("job_title", "")) else str(row.get("job_title", "")).strip()
             is_active = row.get("is_active", True)
             password_value = row.get("password", "")
             password = "" if pd.isna(password_value) else str(password_value).strip()
@@ -1145,6 +1148,9 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
             if existing:
                 # تحديث المستخدم الموجود
                 existing.role = role
+                existing.email = email.strip()
+                existing.phone = phone.strip()
+                existing.job_title = job_title
                 if pd.notna(is_active):
                     existing.is_active = bool(is_active)
                 # تحديث كلمة المرور إذا كانت موجودة في الملف
@@ -1154,7 +1160,7 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
             else:
                 # إنشاء مستخدم جديد بكلمة مرور من الملف أو افتراضية
                 new_password = password if password and password != "LEGACY_HASH_NOT_DECRYPTABLE" else "123456"
-                db.add(User(username=username, password_hash=hash_password(new_password), role=role))
+                db.add(User(username=username, password_hash=hash_password(new_password), role=role, job_title=job_title or None, email=email or None, phone=phone or None))
                 count_created += 1
         
         db.commit()

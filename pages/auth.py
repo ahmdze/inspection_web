@@ -47,7 +47,8 @@ async def login_page():
       <label for="remember" class="text-sm text-gray-600">حفظ معلومات الدخول</label>
     </div>
     <button class="w-full bg-blue-600 text-white py-2 rounded">دخول</button></form>
-    <div class="mt-4 text-center">
+    <div class="mt-4 text-center space-y-2">
+      <a href="/register" class="text-blue-600 hover:underline text-sm">👤 تسجيل حساب جديد</a>
       <button onclick="showAbout()" class="text-blue-600 hover:underline text-sm">ℹ️ حول</button>
     </div>
     </div>
@@ -55,11 +56,13 @@ async def login_page():
     <!-- نافذة حول -->
     <div id="about-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div class="bg-white p-6 rounded-lg max-w-md mx-4 shadow-xl">
-        <h2 class="text-xl font-bold text-blue-800 mb-4 text-center">معلومات المطور</h2>
+        <h2 class="text-xl font-bold text-blue-800 mb-4 text-center">تم برمجة وتطوير البرنامج من قبل</h2>
         <div class="space-y-3 text-right">
           <div class="flex items-center gap-2">
-            <span class="text-gray-600 font-bold">الاسم:</span>
-            <span>تقني طبي - احمد زياد رحيمه</span>
+            <span class="text-gray-600 font-bold"> تقني طبي - احمد زياد رحيمه</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-gray-600 font-bold">للتواصل والدعم:</span>
           </div>
           <div class="flex items-center gap-2">
             <span class="text-gray-600 font-bold">الهاتف:</span>
@@ -90,6 +93,8 @@ async def login(request: Request, db: Session = Depends(get_db), username: str =
     user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(password, user.password_hash): 
         raise HTTPException(401, "بيانات خاطئة")
+    if not user.is_active:
+        raise HTTPException(401, "الحساب معلق بانتظار موافقة المدير")
     token = serializer.dumps(user.id)
     resp = RedirectResponse(url="/dashboard", status_code=302)
     resp.set_cookie("session_token", token, httponly=True, max_age=86400)
@@ -99,6 +104,51 @@ async def login(request: Request, db: Session = Depends(get_db), username: str =
     db.add(AuditLog(user_id=user.id, action="LOGIN", details="دخول ناجح", ip_address=ip, timestamp=datetime.now()))
     db.commit()
     return resp
+
+@router.get("/register", response_class=HTMLResponse)
+async def register_page():
+    return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
+    <div class="max-w-md mx-auto bg-white p-6 rounded shadow mt-10">
+    <h1 class="text-2xl font-bold text-blue-800 mb-2 text-center">تسجيل حساب جديد</h1>
+    <p class="text-gray-500 text-center mb-4">أكمل الملف الشخصي ثم انتظر موافقة المدير</p>
+    <form action="/register" method="post" class="space-y-4">
+    <input name="username" placeholder="اسم المستخدم" required class="w-full p-2 border rounded">
+    <input name="email" type="email" placeholder="البريد الإلكتروني" required class="w-full p-2 border rounded">
+    <input name="phone" placeholder="رقم الهاتف" required class="w-full p-2 border rounded">
+    <input name="password" type="password" placeholder="كلمة المرور" required class="w-full p-2 border rounded">
+    <input name="job_title" placeholder="العنوان الوظيفي (اختياري)" class="w-full p-2 border rounded">
+    <select name="role" class="w-full p-2 border rounded" required>
+      <option value="inspector">مفتش</option>
+      <option value="admin">مدير</option>
+    </select>
+    <button class="w-full bg-green-600 text-white py-2 rounded">تسجيل</button></form>
+    <div class="mt-4 text-center"><a href="/login" class="text-blue-600 hover:underline text-sm">← العودة إلى تسجيل الدخول</a></div>
+    </div></body></html>"""
+
+@router.post("/register")
+async def register(request: Request, db: Session = Depends(get_db), username: str = Form(...), email: str = Form(...), phone: str = Form(...), password: str = Form(...), job_title: str = Form(""), role: str = Form("inspector")):
+    from database import User
+    from datetime import datetime
+    from password_utils import encrypt_password
+
+    if db.query(User).filter(User.username == username).first():
+        raise HTTPException(400, "اسم المستخدم موجود بالفعل")
+    if role not in ["admin", "inspector"]:
+        role = "inspector"
+
+    db.add(User(username=username, password_hash=encrypt_password(password), role=role, job_title=job_title.strip() or None, email=email.strip() or None, phone=phone.strip() or None, is_active=False))
+    db.commit()
+
+    return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4 flex items-center justify-center min-h-screen"><div class="bg-white p-6 rounded shadow max-w-md text-center">
+    <h1 class="text-2xl font-bold text-green-600 mb-4">✅ تم إرسال طلب التسجيل</h1>
+    <p class="text-gray-700 mb-4">تم إنشاء حسابك، وسيظهر الآن كطلب قيد المراجعة من قبل المدير.</p>
+    <p class="text-sm text-gray-500 mb-4">يمكنك الاتصال بالمدير للحصول على الموافقة على الرقم:</p>
+    <p class="text-lg font-bold text-blue-700 mb-4">07723064622</p>
+    <p class="text-sm text-gray-500 mb-4">بعد الموافقة سيتم تفعيل الحساب وبدء الدخول.</p>
+    <a href="/login" class="inline-block bg-blue-600 text-white px-4 py-2 rounded">العودة لتسجيل الدخول</a>
+    </div></body></html>"""
 
 @router.post("/logout")
 async def logout():
@@ -123,6 +173,18 @@ async def profile_page(request: Request, db: Session = Depends(get_db)):
         <input name="username" value="{user.username}" required class="w-full p-2 border rounded">
       </div>
       <div>
+        <label class="block font-bold mb-2">البريد الإلكتروني</label>
+        <input name="email" type="email" value="{user.email or ''}" class="w-full p-2 border rounded">
+      </div>
+      <div>
+        <label class="block font-bold mb-2">رقم الهاتف</label>
+        <input name="phone" value="{user.phone or ''}" class="w-full p-2 border rounded">
+      </div>
+      <div>
+        <label class="block font-bold mb-2">العنوان الوظيفي</label>
+        <input name="job_title" value="{user.job_title or ''}" class="w-full p-2 border rounded">
+      </div>
+      <div>
         <label class="block font-bold mb-2">كلمة المرور الجديدة</label>
         <input name="password" type="password" placeholder="اتركه فارغاً إذا لم ترد تغييره" class="w-full p-2 border rounded">
       </div>
@@ -137,7 +199,7 @@ async def profile_page(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/profile")
 async def profile_update(request: Request, db: Session = Depends(get_db), 
-                         username: str = Form(...), password: str = Form("")):
+                         username: str = Form(...), email: str = Form(""), phone: str = Form(""), password: str = Form(""), job_title: str = Form("")):
     from database import User, AuditLog
     from datetime import datetime
     from itsdangerous import URLSafeTimedSerializer
@@ -150,6 +212,9 @@ async def profile_update(request: Request, db: Session = Depends(get_db),
         raise HTTPException(400, "اسم المستخدم مستخدم بالفعل")
     
     user.username = username
+    user.email = email.strip()
+    user.phone = phone.strip()
+    user.job_title = job_title.strip()
     if password.strip():
         user.password_hash = hash_password(password)
     

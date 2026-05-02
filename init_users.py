@@ -18,6 +18,9 @@ if db.query(User).count() == 0:
         username="admin",
         password_hash=password_hash,
         role="admin",
+        job_title="مدير النظام",
+        email="admin@example.com",
+        phone="07723064622",
         is_active=True
     )
     db.add(admin_user)

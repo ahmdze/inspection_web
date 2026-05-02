@@ -55,6 +55,7 @@ async def admin_sessions(request: Request, db: Session = Depends(get_db)):
       </form>
       <a href="/admin/session/{s.id}" class="bg-blue-600 text-white px-2 py-1 rounded text-xs mr-1">عرض</a>
       <form action="/generate/{s.id}" method="post" class="inline"><button class="bg-indigo-600 text-white px-2 py-1 rounded text-xs mr-1">تقرير</button></form>
+      <form action="/admin/sessions/{s.id}/delete" method="post" class="inline" onsubmit="return confirm('هل تريد حذف هذه الجولة وكل الإجابات المرتبطة بها؟')"><button class="bg-red-600 text-white px-2 py-1 rounded text-xs mr-1">حذف</button></form>
     </td></tr>''' for s in sessions)
     
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
@@ -80,6 +81,28 @@ async def toggle_session_status(sid: int, request: Request, db: Session = Depend
         db.add(AuditLog(user_id=user.id, action="TOGGLE_SESSION", details=f"تغيير حالة الجولة {s.institution} إلى {s.status}", ip_address=ip, timestamp=datetime.now()))
         db.commit()
     
+    return RedirectResponse(url="/admin/sessions", status_code=302)
+
+@router.post("/admin/sessions/{sid}/delete")
+async def delete_session(sid: int, request: Request, db: Session = Depends(get_db)):
+    from database import InspectionSession, Submission, AuditLog
+    from datetime import datetime
+
+    user = get_current_user(request, db)
+    if user.role not in ["admin"]:
+        raise HTTPException(403, "صلاحية غير كافية")
+
+    s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
+    if not s:
+        raise HTTPException(404, "الجولة غير موجودة")
+
+    details = f"حذف الجولة {s.institution} - {s.session_code}"
+    db.query(Submission).filter(Submission.session_id == sid).delete()
+    db.delete(s)
+
+    ip = request.headers.get("x-forwarded-for", request.client.host)
+    db.add(AuditLog(user_id=user.id, action="DELETE_SESSION", details=details, ip_address=ip, timestamp=datetime.now()))
+    db.commit()
     return RedirectResponse(url="/admin/sessions", status_code=302)
 
 @router.post("/admin/session/{sid}/template")

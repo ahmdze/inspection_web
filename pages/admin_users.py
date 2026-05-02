@@ -46,21 +46,26 @@ async def admin_users(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(403, "صلاحية غير كافية")
     
     users = db.query(User).all()
-    rows = "".join(f'''<tr class="border-b"><td class="p-2">{u.username}</td><td class="p-2">{u.role}</td>
-    <td class="p-2">
-    <form action="/admin/users/{u.id}/toggle" method="post" class="inline">
-      <button class="px-2 py-1 rounded text-xs {'bg-green-500 text-white' if u.is_active else 'bg-red-500 text-white'}">{'✅' if u.is_active else '❌'}</button></form></td>
-    <td class="p-2">
+    pending_users = [u for u in users if not u.is_active]
+    rows = "".join(f'''<tr class="border-b"><td class="p-2">{u.username}</td><td class="p-2">{u.job_title or ''}</td><td class="p-2">{u.email or ''}</td><td class="p-2">{u.phone or ''}</td><td class="p-2">{u.role}</td>
+    <td class="p-2"><span class="px-2 py-1 rounded text-xs {'bg-yellow-100 text-yellow-700' if not u.is_active else 'bg-green-100 text-green-700'}">{'معلق' if not u.is_active else 'مفعل'}</span></td>
+    <td class="p-2">{('<form action="/admin/users/'+str(u.id)+'/approve" method="post" class="inline"><button class="bg-blue-600 text-white px-2 py-1 rounded text-xs">✅ موافقة</button></form>' if not u.is_active else '<form action="/admin/users/'+str(u.id)+'/toggle" method="post" class="inline"><button class="px-2 py-1 rounded text-xs bg-green-500 text-white">✅</button></form>')}
       <a href="/admin/users/{u.id}/edit" class="bg-yellow-500 text-white px-2 py-1 rounded text-xs mr-1">✏️ تعديل</a>
       {'<form action="/admin/users/'+str(u.id)+'/delete" method="post" class="inline" onsubmit="return confirm(\'حذف؟\')">' if u.id!=user.id else ''}
       {'<button class="bg-red-600 text-white px-2 py-1 rounded text-xs">حذف</button>' if u.id!=user.id else ''}
     {'</form>' if u.id!=user.id else ''}</td></tr>''' for u in users)
     
+    pending_section = ""
+    if pending_users:
+        pending_rows = "".join(f'''<tr class="border-b"><td class="p-2">{u.username}</td><td class="p-2">{u.job_title or ''}</td><td class="p-2">{u.email or ''}</td><td class="p-2">{u.phone or ''}</td><td class="p-2">{u.role}</td><td class="p-2">{u.id}</td><td class="p-2"><form action="/admin/users/{u.id}/approve" method="post"><button class="bg-blue-600 text-white px-2 py-1 rounded text-xs">✅ موافقة</button></form></td></tr>''' for u in pending_users)
+        pending_section = f"""
+        <div class=\"mb-6\">\n          <h2 class=\"text-lg font-bold mb-3\">📥 طلبات التسجيل المعلقة</h2>\n          <div class=\"overflow-x-auto rounded border bg-yellow-50 p-3\">\n            <table class=\"w-full text-right\"><thead class=\"bg-yellow-100\"><tr><th class=\"p-2\">الاسم</th><th class=\"p-2\">العنوان الوظيفي</th><th class=\"p-2\">الدور</th><th class=\"p-2\">معرف</th><th class=\"p-2\">إجراء</th></tr></thead><tbody>{pending_rows}</tbody></table>\n          </div>\n        </div>\n        """
+
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
     <div class="max-w-6xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between mb-4"><h1 class="text-xl font-bold">👥 المستخدمون</h1><a href="/admin/panel" class="text-blue-600">← العودة</a></div>
-    
+    {pending_section}
     <!-- أزرار الإكسل -->
-    <div class="mb-4 flex gap-2">
+    <div class="mb-4 flex gap-2 flex-wrap">
       <form action="/admin/users/export" method="get" class="inline">
         <button class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">📤 تصدير Excel</button>
       </form>
@@ -70,16 +75,19 @@ async def admin_users(request: Request, db: Session = Depends(get_db)):
       </form>
     </div>
     
-    <form action="/admin/users" method="post" class="bg-gray-50 p-4 rounded mb-6 grid grid-cols-2 md:grid-cols-4 gap-2">
+    <form action="/admin/users" method="post" class="bg-gray-50 p-4 rounded mb-6 grid grid-cols-1 md:grid-cols-6 gap-2">
       <input name="username" placeholder="اسم المستخدم" required class="p-2 border rounded">
+      <input name="email" type="email" placeholder="البريد الإلكتروني" class="p-2 border rounded">
+      <input name="phone" placeholder="رقم الهاتف" class="p-2 border rounded">
+      <input name="job_title" placeholder="العنوان الوظيفي" class="p-2 border rounded">
       <input name="password" type="password" placeholder="كلمة المرور" required class="p-2 border rounded">
       <select name="role" class="p-2 border rounded"><option value="inspector">مفتش</option><option value="admin">مدير</option></select>
       <button class="bg-green-600 text-white p-2 rounded">➕ إضافة</button></form>
-    <table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الاسم</th><th>الدور</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></body></html>"""
+    <table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الاسم</th><th class="p-2">العنوان الوظيفي</th><th class="p-2">البريد الإلكتروني</th><th class="p-2">رقم الهاتف</th><th>الدور</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></body></html>"""
 
 @router.post("/admin/users")
 async def create_user(request: Request, db: Session = Depends(get_db),
-                      username: str = Form(...), password: str = Form(...), role: str = Form("inspector")):
+                      username: str = Form(...), email: str = Form(""), phone: str = Form(""), job_title: str = Form(""), password: str = Form(...), role: str = Form("inspector")):
     from database import User, AuditLog
     from datetime import datetime
     
@@ -92,7 +100,7 @@ async def create_user(request: Request, db: Session = Depends(get_db),
     
     def hash_password(pw): return encrypt_password(pw)
     
-    db.add(User(username=username, password_hash=hash_password(password), role=role))
+    db.add(User(username=username, password_hash=hash_password(password), role=role, job_title=job_title.strip() or None, email=email.strip() or None, phone=phone.strip() or None))
     db.commit()
     
     ip = request.headers.get("x-forwarded-for", request.client.host)
@@ -113,6 +121,25 @@ async def toggle_user(uid: int, request: Request, db: Session = Depends(get_db))
     u = db.query(User).filter(User.id == uid).first()
     if u and u.id != user.id: 
         u.is_active = not u.is_active
+        db.commit()
+    
+    return RedirectResponse(url="/admin/users", status_code=302)
+
+@router.post("/admin/users/{uid}/approve")
+async def approve_user(uid: int, request: Request, db: Session = Depends(get_db)):
+    from database import User, AuditLog
+    from datetime import datetime
+    
+    user = get_current_user(request, db)
+    if user.role != "admin":
+        raise HTTPException(403, "صلاحية غير كافية")
+    
+    u = db.query(User).filter(User.id == uid).first()
+    if u and not u.is_active:
+        u.is_active = True
+        db.commit()
+        ip = request.headers.get("x-forwarded-for", request.client.host)
+        db.add(AuditLog(user_id=user.id, action="APPROVE_USER", details=f"موافقة على {u.username}", ip_address=ip, timestamp=datetime.now()))
         db.commit()
     
     return RedirectResponse(url="/admin/users", status_code=302)
@@ -149,13 +176,16 @@ async def edit_user_page(uid: int, request: Request, db: Session = Depends(get_d
     <body class="bg-gray-50 p-4"><div class="max-w-md mx-auto bg-white p-6 rounded shadow"><h1 class="text-xl font-bold mb-4">✏️ تعديل: {u.username}</h1>
     <form action="/admin/users/{uid}/edit" method="post" class="space-y-3">
       <input name="username" value="{u.username}" required class="w-full p-2 border rounded">
+      <input name="email" type="email" value="{u.email or ''}" placeholder="البريد الإلكتروني" class="w-full p-2 border rounded">
+      <input name="phone" value="{u.phone or ''}" placeholder="رقم الهاتف" class="w-full p-2 border rounded">
+      <input name="job_title" value="{u.job_title or ''}" placeholder="العنوان الوظيفي" class="w-full p-2 border rounded">
       <input name="password" type="password" placeholder="اتركه فارغاً إذا لم ترد تغييره" class="w-full p-2 border rounded">
       <select name="role" class="w-full p-2 border rounded"><option value="inspector" {'selected' if u.role=='inspector' else ''}>مفتش</option><option value="admin" {'selected' if u.role=='admin' else ''}>مدير</option></select>
       <button class="w-full bg-blue-600 text-white py-2 rounded">💾 حفظ</button></form><a href="/admin/users" class="block text-center mt-4 text-gray-500">← إلغاء</a></div></body></html>"""
 
 @router.post("/admin/users/{uid}/edit")
 async def edit_user_submit(uid: int, request: Request, db: Session = Depends(get_db),
-                           username: str = Form(...), password: str = Form(""), role: str = Form("inspector")):
+                           username: str = Form(...), email: str = Form(""), phone: str = Form(""), job_title: str = Form(""), password: str = Form(""), role: str = Form("inspector")):
     from database import User, AuditLog
     from datetime import datetime
     
@@ -173,6 +203,9 @@ async def edit_user_submit(uid: int, request: Request, db: Session = Depends(get
         raise HTTPException(400, "اسم المستخدم مستخدم")
     
     u.username = username
+    u.email = email.strip()
+    u.phone = phone.strip()
+    u.job_title = job_title.strip()
     u.role = role
     if password.strip(): 
         u.password_hash = hash_password(password)
@@ -199,6 +232,9 @@ async def export_users(request: Request, db: Session = Depends(get_db)):
     for u in users:
         data.append({
             "username": u.username, 
+            "job_title": u.job_title or "",
+            "email": u.email or "",
+            "phone": u.phone or "",
             "password": export_password(u.password_hash),
             "role": u.role, 
             "is_active": u.is_active
@@ -228,7 +264,7 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
         # التحقق من الأعمدة المطلوبة
         required_cols = ["username", "role"]
         if not all(col in df.columns for col in required_cols):
-            raise HTTPException(400, "يجب أن يحتوي الملف على أعمدة: username, role, password (اختياري), is_active (اختياري)")
+            raise HTTPException(400, "يجب أن يحتوي الملف على أعمدة: username, role, password (اختياري), is_active (اختياري), job_title (اختياري), email (اختياري), phone (اختياري)")
         
         count_created = 0
         count_updated = 0
@@ -236,6 +272,9 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
         for _, row in df.iterrows():
             username = str(row["username"]).strip()
             role = str(row.get("role", "inspector")).strip()
+            email = "" if pd.isna(row.get("email", "")) else str(row.get("email", "")).strip()
+            phone = "" if pd.isna(row.get("phone", "")) else str(row.get("phone", "")).strip()
+            job_title = "" if pd.isna(row.get("job_title", "")) else str(row.get("job_title", "")).strip()
             is_active = row.get("is_active", True)
             password_value = row.get("password", "")
             password = "" if pd.isna(password_value) else str(password_value).strip()
@@ -248,6 +287,7 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
             if existing:
                 # تحديث المستخدم الموجود
                 existing.role = role
+                existing.job_title = job_title
                 if pd.notna(is_active):
                     existing.is_active = bool(is_active)
                 # تحديث كلمة المرور إذا كانت موجودة في الملف (تشفيرها قبل الحفظ)
@@ -257,7 +297,7 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
             else:
                 # إنشاء مستخدم جديد بكلمة مرور من الملف أو افتراضية (مع التشفير)
                 new_password = password if password and password != "LEGACY_HASH_NOT_DECRYPTABLE" else "123456"
-                db.add(User(username=username, password_hash=hash_password(new_password), role=role))
+                db.add(User(username=username, password_hash=hash_password(new_password), role=role, job_title=job_title or None, email=email or None, phone=phone or None))
                 count_created += 1
         
         db.commit()

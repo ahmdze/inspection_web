@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, func
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, func, text
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from datetime import datetime
 import secrets, json, os
@@ -11,6 +11,9 @@ class User(Base):
     username = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, default="inspector")
+    job_title = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
 
 class InspectionSession(Base):
@@ -98,12 +101,20 @@ SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
     Base.metadata.create_all(engine)
+    with engine.connect() as conn:
+        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
+        if "job_title" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN job_title VARCHAR"))
+        if "email" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR"))
+        if "phone" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR"))
     try:
         with SessionLocal() as db:
             from password_utils import encrypt_password
 
             if db.query(User).count() == 0:
-                db.add(User(username="admin", password_hash=encrypt_password("123"), role="admin", is_active=True))
+                db.add(User(username="admin", password_hash=encrypt_password("123"), role="admin", job_title="مدير النظام", is_active=True))
                 db.commit()
             # إضافة الإعدادات الافتراضية
             if db.query(SystemSetting).count() == 0:
