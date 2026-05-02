@@ -95,20 +95,34 @@ class AuditLog(Base):
     details = Column(Text, nullable=True)
     ip_address = Column(String, nullable=True)
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inspection.db")
-engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+# تحديد مسار قاعدة البيانات - يمكن تغييره عبر متغير بيئة
+DB_PATH = os.environ.get("DATABASE_URL", os.path.join(os.path.dirname(os.path.abspath(__file__)), "inspection.db"))
+
+# إذا كان المسار يبدأ بـ sqlite:/// نستخدمه كما هو، وإلا نضيف البادئة
+if DB_PATH.startswith("sqlite:///"):
+    engine = create_engine(DB_PATH, connect_args={"check_same_thread": False})
+elif DB_PATH.startswith("postgresql://") or DB_PATH.startswith("postgres://"):
+    # دعم PostgreSQL لقواعد البيانات السحابية
+    engine = create_engine(DB_PATH)
+else:
+    # مسار ملف محلي
+    if not DB_PATH.startswith("/"):
+        DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), DB_PATH)
+    engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
     Base.metadata.create_all(engine)
-    with engine.connect() as conn:
-        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
-        if "job_title" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN job_title VARCHAR"))
-        if "email" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR"))
-        if "phone" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR"))
+    # هذه الأوامر خاصة بـ SQLite فقط
+    if DB_PATH.startswith("sqlite"):
+        with engine.connect() as conn:
+            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
+            if "job_title" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN job_title VARCHAR"))
+            if "email" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR"))
+            if "phone" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR"))
     try:
         with SessionLocal() as db:
             from password_utils import encrypt_password
