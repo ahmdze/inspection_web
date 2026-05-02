@@ -11,3 +11,8 @@ python-dotenv
 openpyxl
 pandas
 psycopg2-binary
+reportlab
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
