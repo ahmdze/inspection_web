@@ -109,13 +109,13 @@ async def dashboard(user=Depends(get_current_user)):
 
 # ================== باني النموذج ==================
 @app.get("/admin/form-builder", response_class=HTMLResponse)
-async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db), edit_template_id: int = Query(default=None)):
+async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db), edit_template_id: str = Query(default=None)):
     # جلب الأقسام من قاعدة البيانات
     root_sections = db.query(Section).filter(Section.parent_id == None).order_by(Section.order).all()
     
     # معالجة edit_template_id بشكل آمن
     try:
-        edit_tid = int(edit_template_id) if edit_template_id else None
+        edit_tid = int(edit_template_id) if edit_template_id and edit_template_id.strip() else None
     except (ValueError, TypeError):
         edit_tid = None
     
@@ -171,7 +171,7 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
     </script></body></html>"""
 
 @app.get("/admin/form-field/new", response_class=HTMLResponse)
-async def new_field(user=Depends(require_role(Role.ADMIN.value)), section_id: int = Query(None), edit_template_id: int = Query(default=None), db: Session = Depends(get_db)):
+async def new_field(user=Depends(require_role(Role.ADMIN.value)), section_id: int = Query(None), edit_template_id: str = Query(default=None), db: Session = Depends(get_db)):
     if not section_id:
         raise HTTPException(400, "يجب تحديد القسم")
     section = db.query(Section).filter(Section.id == section_id).first()
@@ -179,13 +179,13 @@ async def new_field(user=Depends(require_role(Role.ADMIN.value)), section_id: in
         raise HTTPException(404, "القسم غير موجود")
     # معالجة edit_template_id الفارغ أو غير الصحيح
     try:
-        edit_tid = int(edit_template_id) if edit_template_id else None
+        edit_tid = int(edit_template_id) if edit_template_id and edit_template_id.strip() else None
     except (ValueError, TypeError):
         edit_tid = None
     return _render_field_form(None, section_id, section.name, db, edit_tid)
 
 @app.get("/admin/form-field/edit/{fid}", response_class=HTMLResponse)
-async def edit_field(fid: int, user=Depends(require_role(Role.ADMIN.value)), edit_template_id: int = Query(default=None), db: Session = Depends(get_db)):
+async def edit_field(fid: int, user=Depends(require_role(Role.ADMIN.value)), edit_template_id: str = Query(default=None), db: Session = Depends(get_db)):
     f = db.query(FormField).filter(FormField.id == fid).first()
     if not f:
         raise HTTPException(404)
@@ -193,7 +193,7 @@ async def edit_field(fid: int, user=Depends(require_role(Role.ADMIN.value)), edi
     section_name = section.name if section else "غير محدد"
     # معالجة edit_template_id الفارغ أو غير الصحيح
     try:
-        edit_tid = int(edit_template_id) if edit_template_id else None
+        edit_tid = int(edit_template_id) if edit_template_id and edit_template_id.strip() else None
     except (ValueError, TypeError):
         edit_tid = None
     return _render_field_form(f, f.section_id, section_name, db, edit_tid)
