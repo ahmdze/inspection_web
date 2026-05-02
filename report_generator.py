@@ -88,6 +88,7 @@ def build_web_report(data: dict, output_folder: str) -> str:
     set_font_style(p_note.add_run("وتم ملاحظة الاتي :"), size=12, bold=True)
     doc.add_paragraph(" ")
 
+    _add_title(doc, "المعلومات العامة:", 16)
     for label, value in general.items():
         if label in ["institution", "visit_date"]:
             continue
@@ -101,10 +102,9 @@ def build_web_report(data: dict, output_folder: str) -> str:
         if not section_data and not subsections:
             continue
 
+        _add_title(doc, section.get("name", "محور"), 16)
         for item in section_data:
-            label = item.get("label", "")
-            value = item.get("value", "")
-            _add_field(doc, label, f"\n{value}")
+            _add_field(doc, item.get("label", ""), item.get("value", ""))
 
         for _, subsection in subsections:
             subsection_data = sorted(subsection.get("data", []), key=lambda item: item.get("order", 0))
@@ -130,6 +130,7 @@ def build_web_report(data: dict, output_folder: str) -> str:
             items = [item for item in recommendations.get(cat["key"], []) if str(item).strip()]
             if not items:
                 continue
+            _add_title(doc, cat["label"], 14)
             for item in items:
                 p = doc.add_paragraph()
                 set_rtl_and_justify(p)
