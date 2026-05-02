@@ -4,6 +4,14 @@ from sqlalchemy.orm import Session
 
 router = APIRouter()
 
+def get_db():
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 def get_current_user(request: Request, db: Session):
     from itsdangerous import URLSafeTimedSerializer
     serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
@@ -21,7 +29,7 @@ def get_current_user(request: Request, db: Session):
     return user
 
 @router.get("/admin/sessions", response_class=HTMLResponse)
-async def admin_sessions(request: Request, db: Session = Depends(lambda: None)):
+async def admin_sessions(request: Request, db: Session = Depends(get_db)):
     from database import InspectionSession
     
     user = get_current_user(request, db)
@@ -45,7 +53,7 @@ async def admin_sessions(request: Request, db: Session = Depends(lambda: None)):
     <div class="overflow-x-auto"><table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">المؤسسة</th><th>تاريخ الزيارة</th><th>رمز الجولة</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></div></body></html>"""
 
 @router.post("/admin/sessions/{sid}/toggle")
-async def toggle_session_status(sid: int, request: Request, db: Session = Depends(lambda: None)):
+async def toggle_session_status(sid: int, request: Request, db: Session = Depends(get_db)):
     from database import InspectionSession, AuditLog
     from datetime import datetime
     
@@ -65,7 +73,7 @@ async def toggle_session_status(sid: int, request: Request, db: Session = Depend
     return RedirectResponse(url="/admin/sessions", status_code=302)
 
 @router.get("/admin/session/{sid}", response_class=HTMLResponse)
-async def view_session(sid: int, request: Request, db: Session = Depends(lambda: None)):
+async def view_session(sid: int, request: Request, db: Session = Depends(get_db)):
     from database import InspectionSession, Submission, FormField, Section, User
     import json
     

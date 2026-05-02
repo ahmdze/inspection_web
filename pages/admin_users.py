@@ -6,6 +6,14 @@ import pandas as pd
 
 router = APIRouter()
 
+def get_db():
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 def get_current_user(request: Request, db: Session):
     from itsdangerous import URLSafeTimedSerializer
     serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
@@ -30,7 +38,7 @@ def require_role(*roles: str):
     return dep
 
 @router.get("/admin/users", response_class=HTMLResponse)
-async def admin_users(request: Request, db: Session = Depends(lambda: None)):
+async def admin_users(request: Request, db: Session = Depends(get_db)):
     from database import User
     user = get_current_user(request, db)
     if user.role not in ["admin"]:
@@ -69,7 +77,7 @@ async def admin_users(request: Request, db: Session = Depends(lambda: None)):
     <table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الاسم</th><th>الدور</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></body></html>"""
 
 @router.post("/admin/users")
-async def create_user(request: Request, db: Session = Depends(lambda: None),
+async def create_user(request: Request, db: Session = Depends(get_db),
                       username: str = Form(...), password: str = Form(...), role: str = Form("inspector")):
     from database import User, AuditLog
     from datetime import datetime
@@ -94,7 +102,7 @@ async def create_user(request: Request, db: Session = Depends(lambda: None),
     return RedirectResponse(url="/admin/users", status_code=302)
 
 @router.post("/admin/users/{uid}/toggle")
-async def toggle_user(uid: int, request: Request, db: Session = Depends(lambda: None)):
+async def toggle_user(uid: int, request: Request, db: Session = Depends(get_db)):
     from database import User, AuditLog
     from datetime import datetime
     
@@ -110,7 +118,7 @@ async def toggle_user(uid: int, request: Request, db: Session = Depends(lambda: 
     return RedirectResponse(url="/admin/users", status_code=302)
 
 @router.post("/admin/users/{uid}/delete")
-async def delete_user(uid: int, request: Request, db: Session = Depends(lambda: None)):
+async def delete_user(uid: int, request: Request, db: Session = Depends(get_db)):
     from database import User, AuditLog
     from datetime import datetime
     
@@ -126,7 +134,7 @@ async def delete_user(uid: int, request: Request, db: Session = Depends(lambda: 
     return RedirectResponse(url="/admin/users", status_code=302)
 
 @router.get("/admin/users/{uid}/edit", response_class=HTMLResponse)
-async def edit_user_page(uid: int, request: Request, db: Session = Depends(lambda: None)):
+async def edit_user_page(uid: int, request: Request, db: Session = Depends(get_db)):
     from database import User
     
     user = get_current_user(request, db)
@@ -146,7 +154,7 @@ async def edit_user_page(uid: int, request: Request, db: Session = Depends(lambd
       <button class="w-full bg-blue-600 text-white py-2 rounded">💾 حفظ</button></form><a href="/admin/users" class="block text-center mt-4 text-gray-500">← إلغاء</a></div></body></html>"""
 
 @router.post("/admin/users/{uid}/edit")
-async def edit_user_submit(uid: int, request: Request, db: Session = Depends(lambda: None),
+async def edit_user_submit(uid: int, request: Request, db: Session = Depends(get_db),
                            username: str = Form(...), password: str = Form(""), role: str = Form("inspector")):
     from database import User, AuditLog
     from datetime import datetime
@@ -179,7 +187,7 @@ async def edit_user_submit(uid: int, request: Request, db: Session = Depends(lam
     return RedirectResponse(url="/admin/users", status_code=302)
 
 @router.get("/admin/users/export")
-async def export_users(request: Request, db: Session = Depends(lambda: None)):
+async def export_users(request: Request, db: Session = Depends(get_db)):
     from database import User
     
     user = get_current_user(request, db)
@@ -196,7 +204,7 @@ async def export_users(request: Request, db: Session = Depends(lambda: None)):
     return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=users.xlsx"})
 
 @router.post("/admin/users/import")
-async def import_users(request: Request, db: Session = Depends(lambda: None), file: UploadFile = File(...)):
+async def import_users(request: Request, db: Session = Depends(get_db), file: UploadFile = File(...)):
     from database import User, AuditLog
     from datetime import datetime
     import hashlib

@@ -11,6 +11,14 @@ def hash_password(pw: str) -> str:
 def verify_password(pw: str, h: str) -> bool: 
     return hash_password(pw) == h
 
+def get_db():
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 def get_current_user(request: Request, db: Session):
     from itsdangerous import URLSafeTimedSerializer
     serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
@@ -76,7 +84,7 @@ async def login_page():
     </body></html>"""
 
 @router.post("/login")
-async def login(request: Request, db: Session = Depends(lambda: None), username: str = Form(...), password: str = Form(...)):
+async def login(request: Request, db: Session = Depends(get_db), username: str = Form(...), password: str = Form(...)):
     from database import User, AuditLog
     from datetime import datetime
     from itsdangerous import URLSafeTimedSerializer
@@ -102,7 +110,7 @@ async def logout():
     return resp
 
 @router.get("/profile", response_class=HTMLResponse)
-async def profile_page(request: Request, db: Session = Depends(lambda: None)):
+async def profile_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head>
@@ -131,7 +139,7 @@ async def profile_page(request: Request, db: Session = Depends(lambda: None)):
     </div></body></html>"""
 
 @router.post("/profile")
-async def profile_update(request: Request, db: Session = Depends(lambda: None), 
+async def profile_update(request: Request, db: Session = Depends(get_db), 
                          username: str = Form(...), password: str = Form("")):
     from database import User, AuditLog
     from datetime import datetime

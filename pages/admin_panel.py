@@ -4,6 +4,14 @@ from sqlalchemy.orm import Session
 
 router = APIRouter()
 
+def get_db():
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 def get_current_user(request: Request, db: Session):
     from itsdangerous import URLSafeTimedSerializer
     serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
@@ -21,7 +29,7 @@ def get_current_user(request: Request, db: Session):
     return user
 
 @router.get("/admin/panel", response_class=HTMLResponse)
-async def admin_panel(request: Request, db: Session = Depends(lambda: None)):
+async def admin_panel(request: Request, db: Session = Depends(get_db)):
     from database import InspectionSession, FormTemplate
     
     user = get_current_user(request, db)
@@ -76,7 +84,7 @@ async def admin_panel(request: Request, db: Session = Depends(lambda: None)):
     </body></html>"""
 
 @router.post("/admin/create")
-async def create_session(request: Request, db: Session = Depends(lambda: None),
+async def create_session(request: Request, db: Session = Depends(get_db),
                          institution: str = Form(...), visit_date: str = Form(...), template_id: str = Form(None)):
     from database import InspectionSession, FormTemplate, AuditLog
     from datetime import datetime

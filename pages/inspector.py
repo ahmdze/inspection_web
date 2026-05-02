@@ -4,6 +4,14 @@ from sqlalchemy.orm import Session
 
 router = APIRouter()
 
+def get_db():
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 def get_current_user(request: Request, db: Session):
     from itsdangerous import URLSafeTimedSerializer
     serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
@@ -24,8 +32,50 @@ def get_current_user(request: Request, db: Session):
 async def success():
     return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4 flex items-center justify-center h-screen"><div class="bg-white p-8 rounded shadow text-center"><h1 class="text-2xl font-bold text-green-600 mb-2">✅ تم الحفظ بنجاح</h1><p class="text-gray-600 mb-4">سيتم دمج البيانات في التقرير النهائي.</p><a href="/dashboard" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة للوحة</a></div></body></html>"""
 
+@router.get("/inspect/dashboard", response_class=HTMLResponse)
+async def inspector_dashboard(request: Request, db: Session = Depends(get_db)):
+    from database import InspectionSession
+    
+    user = get_current_user(request, db)
+    if user.role not in ["inspector", "supervisor"]:
+        raise HTTPException(403, "صلاحية غير كافية")
+    
+    sessions = db.query(InspectionSession).filter(InspectionSession.status == "open").order_by(InspectionSession.created_at.desc()).all()
+    
+    rows = "".join(f'''<li class="border p-4 rounded bg-white mb-3 hover:shadow-lg transition">
+      <div class="flex justify-between items-start">
+        <div>
+          <h3 class="font-bold text-lg text-blue-700">{s.institution}</h3>
+          <p class="text-sm text-gray-600 mt-1">📅 تاريخ الزيارة: {s.visit_date}</p>
+          <p class="text-sm text-gray-500 mt-1">رمز الجولة: <code class="bg-gray-100 px-2 py-1 rounded">{s.session_code}</code></p>
+        </div>
+        <a href="/inspect/{s.session_code}" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-bold">بدء الفحص →</a>
+      </div></li>''' for s in sessions)
+    
+    if not rows:
+        rows = '<li class="border p-4 rounded bg-white text-center text-gray-500">لا توجد جولات نشطة حالياً</li>'
+    
+    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
+    <body class="bg-gray-50 p-4">
+    <div class="max-w-3xl mx-auto">
+      <div class="bg-white p-6 rounded shadow mb-6">
+        <div class="flex justify-between items-center">
+          <div>
+            <h1 class="text-2xl font-bold text-blue-800">👨‍💼 لوحة المفتش</h1>
+            <p class="text-gray-600 mt-1">مرحباً، {user.username}</p>
+          </div>
+          <form action="/logout" method="post"><button class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">خروج</button></form>
+        </div>
+      </div>
+      
+      <div class="bg-white p-6 rounded shadow">
+        <h2 class="text-xl font-bold mb-4">📋 الجولات النشطة</h2>
+        <ul class="space-y-2">{rows}</ul>
+      </div>
+    </div></body></html>"""
+
 @router.get("/inspect/{code}", response_class=HTMLResponse)
-async def inspect_form(code: str, request: Request, db: Session = Depends(lambda: None)):
+async def inspect_form(code: str, request: Request, db: Session = Depends(get_db)):
     from database import InspectionSession, RecommendationCategory, Section, FormField
     
     user = get_current_user(request, db)
@@ -114,7 +164,7 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(lambda
     </script></body></html>"""
 
 @router.post("/inspect/submit")
-async def submit_dynamic(request: Request, db: Session = Depends(lambda: None), bg=None):
+async def submit_dynamic(request: Request, db: Session = Depends(get_db), bg=None):
     from database import InspectionSession, Submission, AuditLog
     from datetime import datetime
     import json
