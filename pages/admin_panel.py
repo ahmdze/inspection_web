@@ -61,6 +61,32 @@ async def admin_panel(request: Request, db: Session = Depends(get_db)):
       <a href="/profile" class="bg-purple-600 text-white px-3 py-1 rounded text-sm">👤 الملف الشخصي</a>
       <form action="/logout" method="post"><button class="bg-red-500 text-white px-3 py-1 rounded text-sm">خروج</button></form></div>"""
     
+    # إضافة لوحة التحليلات المصغرة
+    from sqlalchemy import func
+    from database import Submission, User as DBUser
+    total_sessions = db.query(InspectionSession).count()
+    total_submissions = db.query(Submission).count()
+    total_inspectors = db.query(DBUser).filter(DBUser.role == "inspector", DBUser.is_active == True).count()
+    
+    stats_panel = f"""<div class="grid grid-cols-4 gap-3 mb-6">
+      <div class="bg-blue-50 p-4 rounded border border-blue-200 text-center">
+        <div class="text-3xl font-bold text-blue-700">{total_sessions}</div>
+        <div class="text-sm text-blue-600">جولة</div>
+      </div>
+      <div class="bg-green-50 p-4 rounded border border-green-200 text-center">
+        <div class="text-3xl font-bold text-green-700">{total_submissions}</div>
+        <div class="text-sm text-green-600">إجابة</div>
+      </div>
+      <div class="bg-purple-50 p-4 rounded border border-purple-200 text-center">
+        <div class="text-3xl font-bold text-purple-700">{total_inspectors}</div>
+        <div class="text-sm text-purple-600">مفتش</div>
+      </div>
+      <div class="bg-orange-50 p-4 rounded border border-orange-200 text-center">
+        <div class="text-3xl font-bold text-orange-700">{len(templates)}</div>
+        <div class="text-sm text-orange-600">نموذج</div>
+      </div>
+    </div>"""
+    
     rows = "".join(f'''<li class="border p-3 rounded flex justify-between items-center bg-white mb-2">
       <div><span class="font-bold">{s.institution}</span> | {format_date(s.visit_date)}
       <div class="text-sm text-gray-500 mt-1">الرمز: <code class="bg-gray-100 px-1">{s.session_code}</code></div></div>
@@ -74,6 +100,7 @@ async def admin_panel(request: Request, db: Session = Depends(get_db)):
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
     <div class="max-w-4xl mx-auto"><div class="bg-white p-4 rounded shadow mb-6"><h1 class="text-xl font-bold text-blue-800">👤 لوحة {user.username}</h1>{nav}</div>
+    {stats_panel}
     <div class="bg-white p-4 rounded shadow mb-6"><h2 class="font-bold mb-3">➕ إنشاء جولة تفتيش</h2>
       <form action="/admin/create" method="post" class="grid grid-cols-1 md:grid-cols-4 gap-3">
         <input name="institution" placeholder="اسم المؤسسة" required class="p-2 border rounded">

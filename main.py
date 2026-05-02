@@ -14,6 +14,7 @@ from database import SessionLocal, User, InspectionSession, Submission, FormFiel
 from notifications import notify_async
 from audit import log_action
 from report_generator import build_web_report
+from integrations import EmailNotifier, SlackIntegration, TelegramIntegration, GoogleSheetsIntegration, PDFGenerator, setup_email_from_settings, setup_telegram_from_settings
 import pandas as pd
 from pages import auth_router, admin_panel_router, admin_users_router, admin_sessions_router, inspector_router
 
@@ -1039,7 +1040,16 @@ async def view_session(sid: int, request: Request, user=Depends(require_role(Rol
     }}
     </script>
     <div class="mb-4 max-h-96 overflow-y-auto p-2 border rounded">{rows if rows else '<p class="text-gray-500">لا توجد إجابات بعد</p>'}</div>
-    <form action="/generate/{sid}" method="post"><button class="w-full bg-indigo-600 text-white py-3 rounded font-bold">📅 توليد تقرير Word</button></form></div></body></html>"""
+    <div class="grid grid-cols-2 gap-2 mb-4">
+      <form action="/generate/{sid}" method="post"><button class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded font-bold">📅 تقرير Word</button></form>
+      <form action="/generate-pdf/{sid}" method="post"><button class="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded font-bold">📄 تقرير PDF</button></form>
+    </div>
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      <form action="/export-session/{sid}/csv" method="get"><button class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm">📊 CSV</button></form>
+      <form action="/export-session/{sid}/json" method="get"><button class="w-full bg-yellow-600 hover:bg-yellow-700 text-white py-2 rounded text-sm">📋 JSON</button></form>
+      <form action="/send-email-report/{sid}" method="post"><button class="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded text-sm">✉️ إرسال بالبريد</button></form>
+    </div>
+    </div></body></html>"""
 
 @app.post("/generate/{sid}")
 async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
@@ -1269,10 +1279,11 @@ async def export_form_fields(user=Depends(require_role(Role.ADMIN.value)), db: S
     dv.error = "يرجى اختيار نوع حقل صحيح من القائمة"
     dv.errorTitle = "نوع الحقل غير صالح"
     
-    # تطبيق القائمة المنسدلة على عمود field_type (العمود D)
-    col_letter = "D"
-    dv.add(f"{col_letter}2:{col_letter}{len(data)+1}")
-    ws.add_data_validation(dv)
+    # تطبيق القائمة المنسدلة على عمود field_type (العمود D) - فقط إذا كانت هناك بيانات
+    if len(data) > 0:
+        col_letter = "D"
+        dv.add(f"{col_letter}2:{col_letter}{len(data)+1}")
+        ws.add_data_validation(dv)
     
     # تنسيق العرض
     ws.column_dimensions['A'].width = 20  # section_name
@@ -1420,6 +1431,203 @@ async def import_form_fields(request: Request, db: Session = Depends(get_db), us
         raise
     except Exception as e:
         return {"success": False, "error": f"خطأ في الاستيراد: {str(e)}"}
+
+# ================== تصدير متعدد التنسيقات ==================
+@app.get("/export-session/{sid}/csv")
+async def export_session_csv(sid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    """تصدير بيانات الجلسة إلى CSV"""
+    s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
+    if not s:
+        raise HTTPException(404, "الجلسة غير موجودة")
+    
+    subs = db.query(Submission).filter(Submission.session_id == sid).all()
+    all_fields = db.query(FormField).all()
+    field_map = {f.field_key: f for f in all_fields}
+    
+    data = []
+    for sub in subs:
+        inspector = db.query(User).filter(User.id == sub.user_id).first()
+        inspector_name = inspector.username if inspector else "مجهول"
+        answers = json.loads(sub.answers_json)
+        
+        row = {
+            "المفتش": inspector_name,
+            "الوحدة": sub.unit_name,
+            "تاريخ التقديم": sub.submitted_at.strftime("%Y-%m-%d %H:%M")
+        }
+        
+        for field in all_fields:
+            value = answers.get(field.field_key, "")
+            if isinstance(value, list):
+                value = ", ".join(value)
+            row[field.label] = value
+        
+        data.append(row)
+    
+    df = pd.DataFrame(data)
+    output = io.BytesIO()
+    df.to_csv(output, index=False, encoding='utf-8-sig')
+    output.seek(0)
+    
+    return StreamingResponse(output, media_type="text/csv", 
+                            headers={"Content-Disposition": f"attachment; filename=session_{sid}.csv"})
+
+@app.get("/export-session/{sid}/json")
+async def export_session_json(sid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    """تصدير بيانات الجلسة إلى JSON"""
+    s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
+    if not s:
+        raise HTTPException(404, "الجلسة غير موجودة")
+    
+    subs = db.query(Submission).filter(Submission.session_id == sid).all()
+    all_fields = db.query(FormField).all()
+    
+    data = {
+        "session": {
+            "id": s.id,
+            "institution": s.institution,
+            "visit_date": s.visit_date,
+            "session_code": s.session_code,
+            "created_at": s.created_at.isoformat() if s.created_at else None
+        },
+        "submissions": []
+    }
+    
+    for sub in subs:
+        inspector = db.query(User).filter(User.id == sub.user_id).first()
+        submission_data = {
+            "inspector": inspector.username if inspector else "مجهول",
+            "unit_name": sub.unit_name,
+            "submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
+            "answers": json.loads(sub.answers_json)
+        }
+        data["submissions"].append(submission_data)
+    
+    return StreamingResponse(
+        io.BytesIO(json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=session_{sid}.json"}
+    )
+
+@app.post("/generate-pdf/{sid}")
+async def generate_pdf_report(sid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    """توليد تقرير PDF للجلسة"""
+    from report_generator import build_flat_sections
+    
+    s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
+    if not s:
+        raise HTTPException(404, "الجلسة غير موجودة")
+    
+    subs = db.query(Submission).filter(Submission.session_id == sid).all()
+    if not subs:
+        raise HTTPException(400, "لا توجد إجابات")
+    
+    all_fields = db.query(FormField).all()
+    field_map = {f.field_key: f for f in all_fields}
+    all_sections = db.query(Section).all()
+    
+    flat_sections = build_flat_sections(all_sections, subs, field_map)
+    
+    # تجميع الإجابات
+    answers = {}
+    for sub in subs:
+        sub_answers = json.loads(sub.answers_json)
+        for key, value in sub_answers.items():
+            if key not in answers and not key.startswith("rec_enable_"):
+                answers[key] = value
+    
+    # تحويل الحقول للإجابة
+    fields_data = []
+    for field in all_fields:
+        value = answers.get(field.field_key, "")
+        if isinstance(value, list):
+            value = ", ".join(value)
+        fields_data.append({
+            'label': field.label,
+            'key': field.field_key,
+            'value': str(value) if value else ''
+        })
+    
+    try:
+        pdf_gen = PDFGenerator()
+        pdf_content = pdf_gen.generate_form(
+            form_title=f"تقرير: {s.institution}",
+            fields=fields_data,
+            answers={f['key']: f['value'] for f in fields_data}
+        )
+        
+        return StreamingResponse(
+            io.BytesIO(pdf_content),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=report_{sid}.pdf"}
+        )
+    except ImportError as e:
+        raise HTTPException(500, f"مكتبة reportlab غير متوفرة: {str(e)}")
+    except Exception as e:
+        raise HTTPException(500, f"خطأ في توليد PDF: {str(e)}")
+
+@app.post("/send-email-report/{sid}")
+async def send_email_report(sid: int, request: Request, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    """إرسال التقرير بالبريد الإلكتروني"""
+    s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
+    if not s:
+        raise HTTPException(404, "الجلسة غير موجودة")
+    
+    email_notifier = setup_email_from_settings(db)
+    if not email_notifier:
+        return message_page("إعدادات البريد", "لم يتم إعداد خادم البريد الإلكتروني. يرجى الاتصال بالمسؤول.", 200, f"/admin/session/{sid}", "warning")
+    
+    # الحصول على عنوان البريد من الطلب أو استخدام افتراضي
+    form_data = await request.form()
+    recipient_email = form_data.get("email", "")
+    
+    if not recipient_email:
+        # جلب قائمة المستخدمين admins لإرسال التقرير لهم
+        admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()
+        if not admins or not any(u.email for u in admins):
+            return message_page("بدون مستلمين", "لا يوجد عناوين بريد إلكتروني للمسؤولين.", 200, f"/admin/session/{sid}", "warning")
+        recipient_email = admins[0].email
+    
+    # تجهيز محتوى البريد
+    subject = f"تقرير تفتيش: {s.institution} - {s.visit_date}"
+    
+    subs_count = db.query(Submission).filter(Submission.session_id == sid).count()
+    
+    body_html = f"""
+    <html dir="rtl" style="font-family: Arial, sans-serif;">
+    <body style="background-color: #f5f5f5; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px;">
+            <h2 style="color: #2c5282; text-align: center;">تقرير تفتيش جديد</h2>
+            <hr style="border: none; border-top: 2px solid #e2e8f0; margin: 20px 0;">
+            <p><strong>المؤسسة:</strong> {s.institution}</p>
+            <p><strong>تاريخ الزيارة:</strong> {s.visit_date}</p>
+            <p><strong>عدد الردود:</strong> {subs_count}</p>
+            <p><strong>تم التوليد بواسطة:</strong> {user.username}</p>
+            <p><strong>التاريخ:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="{request.url.scheme}://{request.headers.get('host', '')}/admin/session/{sid}" 
+                   style="background-color: #3182ce; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">عرض التقرير الكامل</a>
+            </div>
+            <hr style="border: none; border-top: 2px solid #e2e8f0; margin: 30px 0 20px;">
+            <p style="text-align: center; color: #718096; font-size: 14px;">هذا بريد تلقائي من نظام التفتيش الذكي</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    result = email_notifier.send_email(
+        to_emails=[recipient_email],
+        subject=subject,
+        body_html=body_html,
+        from_name="نظام التفتيش الذكي"
+    )
+    
+    if result['success']:
+        log_action(user.id, "SEND_EMAIL_REPORT", f"تم إرسال تقرير الجلسة {sid} إلى {recipient_email}", request.headers.get("x-forwarded-for", request.client.host))
+        return message_page("تم الإرسال", f"تم إرسال التقرير بنجاح إلى {recipient_email}", 200, f"/admin/session/{sid}", "success")
+    else:
+        return message_page("فشل الإرسال", f"حدث خطأ: {result['message']}", 200, f"/admin/session/{sid}", "error")
+
 
 if __name__ == "__main__":
     import uvicorn
