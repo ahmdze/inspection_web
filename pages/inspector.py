@@ -55,27 +55,36 @@ document.addEventListener('DOMContentLoaded', async () => {
             await initDB();
             const pending = await getPending();
             if (pending.length > 0) {
-                syncMsg.textContent = '📦 لديك ' + pending.length + ' تقرير(s) قيد الانتظار للرفع';
+                syncMsg.textContent = '📦 لديك ' + pending.length + ' تقرير قيد الانتظار للرفع';
                 syncMsg.classList.add('animate-pulse');
                 
                 // بدء المزامنة فوراً إذا كان متصلاً
                 if (navigator.onLine) {
                     syncMsg.textContent = '🔄 جاري رفع البيانات المعلقة...';
                     await sync();
-                    const remaining = await getPending();
-                    if (remaining.length === 0) {
-                        syncMsg.textContent = '✅ تم رفع جميع البيانات بنجاح!';
-                        syncMsg.classList.remove('animate-pulse');
-                        syncMsg.classList.add('text-green-600');
-                    } else {
-                        syncMsg.textContent = '⚠️ لا يزال هناك ' + remaining.length + ' تقرير(s) لم ترفع';
-                    }
+                    // انتظار قليل للتأكد من اكتمال الحذف
+                    setTimeout(async () => {
+                        const remaining = await getPending();
+                        if (remaining.length === 0) {
+                            syncMsg.textContent = '✅ تم رفع جميع البيانات بنجاح!';
+                            syncMsg.classList.remove('animate-pulse');
+                            syncMsg.classList.add('text-green-600');
+                        } else if (remaining.length < pending.length) {
+                            syncMsg.textContent = '⚠️ تم رفع بعض البيانات، لا يزال هناك ' + remaining.length + ' تقرير لم ترفع';
+                        } else {
+                            syncMsg.textContent = '⚠️ لا يزال هناك ' + remaining.length + ' تقرير لم ترفع - حاول مرة أخرى';
+                        }
+                    }, 1000);
                 } else {
                     syncMsg.textContent = '📴 ستُرفع البيانات تلقائياً عند الاتصال بالإنترنت';
                 }
+            } else {
+                syncMsg.textContent = '✅ لا توجد بيانات معلقة';
+                syncMsg.classList.add('text-green-600');
             }
         } catch(e) {
             console.error('Error checking pending submissions:', e);
+            syncMsg.textContent = '⚠️ حدث خطأ أثناء فحص البيانات المعلقة';
         }
     }
 });
@@ -439,8 +448,13 @@ async def submit_dynamic(request: Request, db: Session = Depends(get_db), bg=Non
     for k, v in form.items():
         if k in ["unit_name", "session_id"]:
             continue
-        if not k.startswith("rec_enable_") and v and str(v).strip():
+        # تجاهل الحقول الفارغة أو التي تحتوي على null فقط
+        if not k.startswith("rec_enable_") and v and str(v).strip() and str(v).lower() not in ['null', 'undefined', '']:
             answers[k] = str(v).strip()
+
+    # التحقق من أن الإجابات ليست فارغة تماماً
+    if not answers:
+        raise HTTPException(400, "لا توجد إجابات صالحة للحفظ")
 
     db.add(Submission(
         session_id=sess.id,
