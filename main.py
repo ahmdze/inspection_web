@@ -27,6 +27,13 @@ app.include_router(inspector_router)
 
 def hash_password(pw: str) -> str: return hashlib.sha256(pw.encode()).hexdigest()
 def verify_password(pw: str, h: str) -> bool: return hash_password(pw) == h
+def format_date(date_str):
+    """تحويل التاريخ من YYYY-MM-DD إلى DD/MM/YYYY"""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%d/%m/%Y")
+    except:
+        return date_str
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -38,7 +45,6 @@ def get_db():
 
 class Role(Enum):
     ADMIN = "admin"
-    SUPERVISOR = "supervisor"
     INSPECTOR = "inspector"
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
@@ -612,7 +618,7 @@ async def delete_section(sec_id: int, request: Request, user=Depends(require_rol
     return RedirectResponse(url="/admin/sections", status_code=302)
 
 @app.get("/admin/logs", response_class=HTMLResponse)
-async def admin_logs(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
+async def admin_logs(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
     rows = "".join(f'''<tr class="border-b"><td class="p-2 text-sm">{l.timestamp.strftime('%d/%m %H:%M')}</td>
     <td class="p-2 text-sm">{db.query(User).filter(User.id==l.user_id).first().username if l.user_id else 'نظام'}</td>
@@ -623,7 +629,7 @@ async def admin_logs(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR
     <div class="overflow-x-auto"><table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الوقت</th><th>المستخدم</th><th>الإجراء</th><th>التفاصيل</th></tr></thead><tbody>{rows}</tbody></table></div></div></body></html>"""
 
 @app.get("/admin/logs/export")
-async def export_logs(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
+async def export_logs(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
     data = [{"الوقت": l.timestamp.strftime("%Y-%m-%d %H:%M"), "المستخدم": db.query(User).filter(User.id==l.user_id).first().username if l.user_id else "نظام", "الإجراء": l.action, "التفاصيل": l.details, "IP": l.ip_address} for l in logs]
     df = pd.DataFrame(data)
@@ -633,7 +639,7 @@ async def export_logs(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISO
     return StreamingResponse(iter([buf.read()]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=audit_log.xlsx"})
 
 @app.get("/dashboard/stats", response_class=HTMLResponse)
-async def stats_dash(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
+async def stats_dash(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     w = datetime.utcnow() - timedelta(days=7)
     total_s = db.query(InspectionSession).count()
     total_sub = db.query(Submission).count()
@@ -766,7 +772,7 @@ async def submit_dynamic(request: Request, db: Session = Depends(get_db), user=D
 
 # ================== توليد التقرير الموحد ==================
 @app.get("/admin/session/{sid}", response_class=HTMLResponse)
-async def view_session(sid: int, request: Request, user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
+async def view_session(sid: int, request: Request, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
     if not s: raise HTTPException(404)
     subs = db.query(Submission).filter(Submission.session_id == sid).all()
@@ -829,7 +835,7 @@ async def view_session(sid: int, request: Request, user=Depends(require_role(Rol
     <form action="/generate/{sid}" method="post"><button class="w-full bg-indigo-600 text-white py-3 rounded font-bold">📅 توليد تقرير Word</button></form></div></body></html>"""
 
 @app.post("/generate/{sid}")
-async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
+async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
     if not s:
         raise HTTPException(404)
@@ -965,7 +971,7 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
             password = str(row.get("password", "")).strip()
             
             # التحقق من صحة الدور
-            if role not in ["admin", "supervisor", "inspector"]:
+            if role not in ["admin", "inspector"]:
                 role = "inspector"
             
             existing = db.query(User).filter(User.username == username).first()

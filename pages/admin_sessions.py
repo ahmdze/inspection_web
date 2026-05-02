@@ -1,8 +1,17 @@
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 router = APIRouter()
+
+def format_date(date_str):
+    """تحويل التاريخ من YYYY-MM-DD إلى DD/MM/YYYY"""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%d/%m/%Y")
+    except:
+        return date_str
 
 def get_db():
     from database import SessionLocal
@@ -33,11 +42,11 @@ async def admin_sessions(request: Request, db: Session = Depends(get_db)):
     from database import InspectionSession
     
     user = get_current_user(request, db)
-    if user.role not in ["admin", "supervisor"]:
+    if user.role not in ["admin"]:
         raise HTTPException(403, "صلاحية غير كافية")
     
     sessions = db.query(InspectionSession).order_by(InspectionSession.created_at.desc()).all()
-    rows = "".join(f'''<tr class="border-b"><td class="p-2">{s.institution}</td><td class="p-2">{s.visit_date}</td>
+    rows = "".join(f'''<tr class="border-b"><td class="p-2">{s.institution}</td><td class="p-2">{format_date(s.visit_date)}</td>
     <td class="p-2"><code class="bg-gray-100 px-1">{s.session_code}</code></td>
     <td class="p-2"><span class="px-2 py-1 rounded text-xs {'bg-green-100 text-green-800' if s.status=='open' else 'bg-red-100 text-red-800'}">{'✅ نشطة' if s.status=='open' else '❌ مغلقة'}</span></td>
     <td class="p-2">
@@ -58,7 +67,7 @@ async def toggle_session_status(sid: int, request: Request, db: Session = Depend
     from datetime import datetime
     
     user = get_current_user(request, db)
-    if user.role not in ["admin", "supervisor"]:
+    if user.role not in ["admin"]:
         raise HTTPException(403, "صلاحية غير كافية")
     
     s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
@@ -78,7 +87,7 @@ async def view_session(sid: int, request: Request, db: Session = Depends(get_db)
     import json
     
     user = get_current_user(request, db)
-    if user.role not in ["admin", "supervisor"]:
+    if user.role not in ["admin"]:
         raise HTTPException(403, "صلاحية غير كافية")
     
     s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
@@ -129,16 +138,32 @@ async def view_session(sid: int, request: Request, db: Session = Depends(get_db)
         <p class="text-sm text-gray-600 mb-1">رابط الجولة:</p>
         <code id="session-url" class="text-blue-700 break-all">{session_url}</code>
       </div>
-      <button onclick="copyLink()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm whitespace-nowrap">📋 نسخ الرابط</button>
+      <button onclick="copyAndShare()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm whitespace-nowrap">📋 نسخ ومشاركة</button>
     </div>
     <script>
-    function copyLink() {{
+    async function copyAndShare() {{
       const url = document.getElementById('session-url').textContent;
-      navigator.clipboard.writeText(url).then(() => {{
-        alert('تم نسخ الرابط!');
-      }}).catch(err => {{
-        prompt('انسخ الرابط يدوياً:', url);
-      }});
+      
+      // أولاً: نسخ الرابط
+      try {{
+        await navigator.clipboard.writeText(url);
+      }} catch(err) {{}}
+      
+      // ثانياً: فتح نافذة المشاركة
+      if (navigator.share) {{
+        try {{
+          await navigator.share({{
+            title: 'جولة تفتيش',
+            text: 'رابط جولة التفتيش: ' + url,
+            url: url
+          }});
+        }} catch(err) {{
+          // تم إلغاء المشاركة أو فشل، لكن النسخ تم بالفعل
+        }}
+      }} else {{
+        // إذا كان المتصفح لا يدعم المشاركة، نعرض رسالة تأكيد النسخ
+        alert('تم نسخ الرابط! يمكنك الآن لصقه في أي مكان.');
+      }}
     }}
     </script>
     <div class="mb-4 max-h-96 overflow-y-auto p-2 border rounded">{rows if rows else '<p class="text-gray-500">لا توجد إجابات بعد</p>'}</div>

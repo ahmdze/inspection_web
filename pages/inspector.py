@@ -1,8 +1,17 @@
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 router = APIRouter()
+
+def format_date(date_str):
+    """تحويل التاريخ من YYYY-MM-DD إلى DD/MM/YYYY"""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%d/%m/%Y")
+    except:
+        return date_str
 
 def get_db():
     from database import SessionLocal
@@ -37,7 +46,7 @@ async def inspector_dashboard(request: Request, db: Session = Depends(get_db)):
     from database import InspectionSession
     
     user = get_current_user(request, db)
-    if user.role not in ["inspector", "supervisor"]:
+    if user.role not in ["inspector"]:
         raise HTTPException(403, "صلاحية غير كافية")
     
     sessions = db.query(InspectionSession).filter(InspectionSession.status == "open").order_by(InspectionSession.created_at.desc()).all()
@@ -46,7 +55,7 @@ async def inspector_dashboard(request: Request, db: Session = Depends(get_db)):
       <div class="flex justify-between items-start">
         <div>
           <h3 class="font-bold text-lg text-blue-700">{s.institution}</h3>
-          <p class="text-sm text-gray-600 mt-1">📅 تاريخ الزيارة: {s.visit_date}</p>
+          <p class="text-sm text-gray-600 mt-1">📅 تاريخ الزيارة: {format_date(s.visit_date)}</p>
           <p class="text-sm text-gray-500 mt-1">رمز الجولة: <code class="bg-gray-100 px-2 py-1 rounded">{s.session_code}</code></p>
         </div>
         <a href="/inspect/{s.session_code}" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-bold">بدء الفحص →</a>
@@ -55,7 +64,8 @@ async def inspector_dashboard(request: Request, db: Session = Depends(get_db)):
     if not rows:
         rows = '<li class="border p-4 rounded bg-white text-center text-gray-500">لا توجد جولات نشطة حالياً</li>'
     
-    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
+    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-50 p-4">
     <div class="max-w-3xl mx-auto">
       <div class="bg-white p-6 rounded shadow mb-6">
@@ -64,7 +74,10 @@ async def inspector_dashboard(request: Request, db: Session = Depends(get_db)):
             <h1 class="text-2xl font-bold text-blue-800">👨‍💼 لوحة المفتش</h1>
             <p class="text-gray-600 mt-1">مرحباً، {user.username}</p>
           </div>
-          <form action="/logout" method="post"><button class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">خروج</button></form>
+          <div class="flex gap-2">
+            <a href="/inspect/profile" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded">👤 الملف الشخصي</a>
+            <form action="/logout" method="post"><button class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">خروج</button></form>
+          </div>
         </div>
       </div>
       
@@ -72,7 +85,7 @@ async def inspector_dashboard(request: Request, db: Session = Depends(get_db)):
         <h2 class="text-xl font-bold mb-4">📋 الجولات النشطة</h2>
         <ul class="space-y-2">{rows}</ul>
       </div>
-    </div></body></html>"""
+    </div></body></html>""".replace("{format_date(s.visit_date)}", format_date(s.visit_date))
 
 @router.get("/inspect/{code}", response_class=HTMLResponse)
 async def inspect_form(code: str, request: Request, db: Session = Depends(get_db)):
@@ -191,3 +204,61 @@ async def submit_dynamic(request: Request, db: Session = Depends(get_db), bg=Non
     db.commit()
     
     return RedirectResponse(url="/inspect/success", status_code=302)
+
+@router.get("/inspect/profile", response_class=HTMLResponse)
+async def inspector_profile(request: Request, db: Session = Depends(get_db)):
+    from database import User
+    
+    user = get_current_user(request, db)
+    if user.role not in ["inspector"]:
+        raise HTTPException(403, "صلاحية غير كافية")
+    
+    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
+    <body class="bg-gray-50 p-4">
+    <div class="max-w-md mx-auto bg-white p-6 rounded shadow">
+      <h1 class="text-xl font-bold mb-4">👤 الملف الشخصي</h1>
+      <p class="text-gray-600 mb-4">مرحباً، {user.username}</p>
+      <form action="/inspect/profile" method="post" class="space-y-3">
+        <div><label class="block font-bold mb-1">اسم المستخدم</label><input name="username" value="{user.username}" required class="w-full p-2 border rounded"></div>
+        <div><label class="block font-bold mb-1">كلمة المرور الجديدة (اتركه فارغاً إذا لم ترد تغييرها)</label><input name="password" type="password" class="w-full p-2 border rounded"></div>
+        <button class="w-full bg-blue-600 text-white py-2 rounded">💾 حفظ التغييرات</button>
+      </form>
+      <a href="/inspect/dashboard" class="block text-center mt-4 text-gray-500">← العودة للوحة</a>
+    </div></body></html>"""
+
+@router.post("/inspect/profile")
+async def update_inspector_profile(request: Request, db: Session = Depends(get_db),
+                                   username: str = Form(...), password: str = Form("")):
+    from database import User, AuditLog
+    from datetime import datetime
+    import hashlib
+    
+    def hash_password(pw): return hashlib.sha256(pw.encode()).hexdigest()
+    
+    current_user = get_current_user(request, db)
+    if current_user.role not in ["inspector"]:
+        raise HTTPException(403, "صلاحية غير كافية")
+    
+    # التحقق من عدم تكرار اسم المستخدم
+    existing = db.query(User).filter(User.username == username, User.id != current_user.id).first()
+    if existing:
+        raise HTTPException(400, "اسم المستخدم مستخدم بالفعل")
+    
+    # تحديث البيانات
+    current_user.username = username
+    if password.strip():
+        current_user.password_hash = hash_password(password)
+    
+    db.commit()
+    
+    # تسجيل العملية في السجل
+    ip = request.headers.get("x-forwarded-for", request.client.host)
+    db.add(AuditLog(user_id=current_user.id, action="UPDATE_PROFILE", details=f"تحديث الملف الشخصي: {username}", ip_address=ip, timestamp=datetime.now()))
+    db.commit()
+    
+    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script></head>
+    <body class="bg-gray-50 p-4 flex items-center justify-center h-screen">
+    <div class="bg-white p-8 rounded shadow text-center">
+      <h1 class="text-2xl font-bold text-green-600 mb-4">✅ تم التحديث بنجاح</h1>
+      <a href="/inspect/profile" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة للملف الشخصي</a>
+    </div></body></html>"""
