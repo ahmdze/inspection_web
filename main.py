@@ -1090,10 +1090,8 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value))
                         cat_key = cat
                         break
                 linked_field_key = k[4:-(len(cat_key) + 1)] if k.endswith(f"_{cat_key}") else k[4:]
-                linked_field = field_map.get(linked_field_key)
-                label = linked_field.label if linked_field else linked_field_key
                 if str(v).strip():
-                    merged["recommendations"][cat_key].append(f"{label}: {str(v)}")
+                    merged["recommendations"][cat_key].append(str(v))
                 continue
                 
             field = field_map.get(k)
