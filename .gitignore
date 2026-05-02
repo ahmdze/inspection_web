@@ -1,36 +1,774 @@
-```
-# Compiled Python files
-*.pyc
+# Python
 __pycache__/
-
-# Virtual environments
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
 venv/
 .venv/
+.ENV
+.ENV.*
+.venv.bak/
+env.bak/
+
+# Build and distribution artifacts
+build/
+dist/
+*.egg
+*.egg-info/
+*.so
+.libs/
+
+# Testing
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Environment variables
 .env
 .env.local
-*.env.*
+.env.*
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
 
-# Editors
-.vscode/
-.idea/
-
 # Temporary files
 *.tmp
+*.temp
+*~
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# PyTest
+.pytest_cache/
+
+# Coverage
+.coverage*
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg-link
+
+# Unit test / coverage reports
+nosetests.xml
+coverage.xml
+*.cover
+*.cache
+
+# Translations
+*.mo
+*.pot
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask
+instance/
+.webassets-cache
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# GitHub Copilot
+.github/copilot/
+
+# Temporary folders for file browsing
+*.tmp/
+tmp*/
+temp*/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Editor backup files
+*~
+*.bak
 *.swp
 *.swo
 
-# Build artifacts
+# Local configuration files
+config.local
+config.dev
+config.prod
+
+# Database
+*.db
+*.db-journal
+
+# Secrets and credentials
+secrets/*
+credentials.json
+.env.production
+.env.development
+.env.test
+.env.staging
+.env.backup
+
+# Cache directories
+.cache/
+.node_cache/
+.yarn_cache/
+
+# Output of 'pip list' and similar commands
+pip-list.txt
+requirements-current.txt
+
+# Virtual environment activation scripts
+activate_this.py
+
+# Python dependency management
+poetry.lock
+Pipfile
+Pipfile.lock
+pyproject.toml
+
+# Runtime persistent data
+*.pid
+*.seed
+*.pid.lock
+
+# Log files
+logs/
+*.log
+
+# Process monitor
+pm2.log
+pm2.pid
+
+# Sentry
+.sentry-native/
+
+# Debug symbol files
+*.dsym
+
+# Platform-specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*.orig
+*.rej
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*.temp.*
+
+# Vim swap files
+[._]*.s[a-v][a-z]
+[._]s[a-v][a-z]
+*.un~
+Session.vim
+.netrwhist
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+# Org-mode
+.org-id-locations
+*_archive
+
+# Briefcase packaging
 build/
-dist/
-target/
+src/
+*.app/
+*.dmg
+*.msi
+*.deb
+*.rpm
+*.AppImage
+*.exe
+
+# Coverage
+.coverage*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.coverage
 
 # Dependencies
 node_modules/
-.mypy_cache/
-.pytest_cache/
-coverage/
-htmlcov/
-```
+.jspm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+node_modules
+jspm_packages/
+
+# TypeScript
+*.tsbuildinfo
+*.njsproj.njsproj.tsbuildinfo
+*.sln.njsproj.njsproj.tsbuildinfo
+
+# Bower dependency directory
+bower_components/
+
+# Grunt intermediate storage
+.grunt
+
+# Gulp intermediate storage
+gulp-cache/
+
+# Sass intermediate storage
+.sass-cache
+
+# Composer vendor folder
+vendor/
+
+# Webpack
+webpack-stats.json
+*.pak
+
+# Browser-sync
+.browser-sync-client/
+
+# Jekyll
+_site/
+
+# Middleman
+.sass-cache/
+.csscomb-cache.json
+.ruby-gemset
+.rvmrc
+
+# Rails
+*.rbc
+capybara-*.html
+.rspec_status
+/public/system
+/vendor/bundle
+/config/database.yml
+/db/*.sqlite3
+/db/*.sqlite3-journal
+/tmp/
+/log/
+/pids/
+/storage/
+/public/uploads
+
+# Ruby
+*.gem
+*.rbc
+.bundle/
+.config/coveralls.yml
+.ruby-gemset
+.ruby-version
+Gemfile.lock
+Guardfile
+Rakefile
+README.md
+CHANGELOG.md
+LICENSE
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+.gitattributes
+.editorconfig
+.rubocop.yml
+.slim-lint.yml
+reek.yml
+.styleguide.yml
+.overcommit.yml
+.mdlrc
+.ronn-config
+.yardopts
+.rb-funkify-history
+.rbenv-vars
+.rbenv-version
+.rbenv-gemsets
+.rbenv-default-gems
+.rbenv-hooks
+.rbenv.d/
+.rbenv.d/**
+.rbenv.d/**/*
+.rbenv.d/**/!*
+.rbenv.d/**/.*
+.rbenv.d/**/.?*
+.rbenv.d/**/..?*
+.rbenv.d/**/...?*
+.rbenv.d/**/....?*
+.rbenv.d/**/.....?*
+.rbenv.d/**/......?*
+.rbenv.d/**/.......?*
+.rbenv.d/**/........?*
+.rbenv.d/**/.........?*
+.rbenv.d/**/..........?*
+.rbenv.d/**/...........?*
+.rbenv.d/**/............?*
+.rbenv.d/**/.............?*
+.rbenv.d/**/..............?*
+.rbenv.d/**/...............?*
+.rbenv.d/**/................?*
+.rbenv.d/**/.................?*
+.rbenv.d/**/..................?*
+.rbenv.d/**/...................?*
+.rbenv.d/**/....................?*
+.rbenv.d/**/.....................?*
+.rbenv.d/**/......................?*
+.rbenv.d/**/.......................?*
+.rbenv.d/**/........................?*
+.rbenv.d/**/.........................?*
+.rbenv.d/**/..........................?*
+.rbenv.d/**/...........................?*
+.rbenv.d/**/............................?*
+.rbenv.d/**/.............................?*
+.rbenv.d/**/................................?*
+.rbenv.d/**/.................................?*
+.rbenv.d/**/..................................?*
+.rbenv.d/**/...................................?*
+.rbenv.d/**/....................................?*
+.rbenv.d/**/.....................................?*
+.rbenv.d/**/......................................?*
+.rbenv.d/**/.......................................?*
+.rbenv.d/**/........................................?*
+.rbenv.d/**/.........................................?*
+.rbenv.d/**/..........................................?*
+.rbenv.d/**/...........................................?*
+.rbenv.d/**/............................................?*
+.rbenv.d/**/.............................................?*
+.rbenv.d/**/..............................................?*
+.rbenv.d/**/...............................................?*
+.rbenv.d/**/................................................?*
+.rbenv.d/**/.................................................?*
+.rbenv.d/**/..................................................?*
+.rbenv.d/**/...................................................?*
+.rbenv.d/**/....................................................?*
+.rbenv.d/**/.....................................................?*
+.rbenv.d/**/......................................................?*
+.rbenv.d/**/.......................................................?*
+.rbenv.d/**/........................................................?*
+.rbenv.d/**/.........................................................?*
+.rbenv.d/**/..........................................................?*
+.rbenv.d/**/...........................................................?*
+.rbenv.d/**/............................................................?*
+.rbenv.d/**/.............................................................?*
+.rbenv.d/**/..............................................................?*
+.rbenv.d/**/...............................................................?*
+.rbenv.d/**/................................................................?*
+.rbenv.d/**/.................................................................?*
+.rbenv.d/**/..................................................................
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*$pyc.class
+*$pyo.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg-link
+*.egg
+*.egg-info
+*.egg-info/
+*.py,cover
+*.py,cover/
+.hypothesis/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.pyc
+*.pyo
+*.pyd
+*.pyc.class
+*.pyo.class
+*.pyd.class
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*$pyc.class
+**/*$pyo.class
+**/*.so
+**/.Python
+**/build/
+**/develop-eggs/
+**/dist/
+**/downloads/
+**/eggs/
+**/.eggs/
+**/lib/
+**/lib64/
+**/parts/
+**/sdist/
+**/var/
+**/wheels/
+**/pip-wheel-metadata/
+**/share/python-wheels/
+**/*.egg-info/
+**/installed.cfg
+**/*.egg-link
+**/*.egg
+**/*.egg-info
+**/*.py,cover
+**/.hypothesis/
+**/.coverage
+**/.cache
+**/nosetests.xml
+**/coverage.xml
+**/*.cover
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.pyc.class
+**/*.pyo.class
+**/*.pyd.class
+**/.*.swp
+**/.*.swo
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/......
+**/.*.swp
+**/.*.swo
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+......
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+**/.*.swo
+**/.*.swp
+**/.*.swn
+......

@@ -13,9 +13,17 @@ from notifications import notify_async
 from audit import log_action
 from report_generator import build_web_report
 import pandas as pd
+from pages import auth_router, admin_panel_router, admin_users_router, admin_sessions_router, inspector_router
 
 app = FastAPI(title="نظام التفتيش الذكي المتقدم")
 serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
+
+# تضمين المسارات من الملفات المنفصلة
+app.include_router(auth_router)
+app.include_router(admin_panel_router)
+app.include_router(admin_users_router)
+app.include_router(admin_sessions_router)
+app.include_router(inspector_router)
 
 def hash_password(pw: str) -> str: return hashlib.sha256(pw.encode()).hexdigest()
 def verify_password(pw: str, h: str) -> bool: return hash_password(pw) == h
@@ -52,225 +60,13 @@ def require_role(*roles: str):
 @app.get("/", response_class=RedirectResponse)
 async def root(): return RedirectResponse(url="/login", status_code=302)
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
-    <div class="max-w-md mx-auto bg-white p-6 rounded shadow mt-10">
-    <h1 class="text-2xl font-bold text-blue-800 mb-2 text-center">نظام التفتيش الذكي المتقدم</h1>
-    <p class="text-gray-500 text-center mb-4">إصدار 1.0</p>
-    <form action="/login" method="post" class="space-y-4">
-    <input name="username" placeholder="اسم المستخدم" required class="w-full p-2 border rounded">
-    <input name="password" type="password" placeholder="كلمة المرور" required class="w-full p-2 border rounded">
-    <div class="flex items-center">
-      <input type="checkbox" id="remember" name="remember" class="ml-2">
-      <label for="remember" class="text-sm text-gray-600">حفظ معلومات الدخول</label>
-    </div>
-    <button class="w-full bg-blue-600 text-white py-2 rounded">دخول</button></form>
-    <div class="mt-4 text-center">
-      <button onclick="showAbout()" class="text-blue-600 hover:underline text-sm">ℹ️ حول</button>
-    </div>
-    </div>
-    
-    <!-- نافذة حول -->
-    <div id="about-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white p-6 rounded-lg max-w-md mx-4 shadow-xl">
-        <h2 class="text-xl font-bold text-blue-800 mb-4 text-center">معلومات المطور</h2>
-        <div class="space-y-3 text-right">
-          <div class="flex items-center gap-2">
-            <span class="text-gray-600 font-bold">الاسم:</span>
-            <span>تقني طبي - احمد زياد رحيمه</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-gray-600 font-bold">الهاتف:</span>
-            <a href="tel:07723064622" class="text-blue-600 hover:underline">07723064622</a>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-gray-600 font-bold">البريد:</span>
-            <a href="mailto:ahmdze@gmail.com" class="text-blue-600 hover:underline">ahmdze@gmail.com</a>
-          </div>
-        </div>
-        <button onclick="closeAbout()" class="mt-6 w-full bg-gray-600 text-white py-2 rounded">إغلاق</button>
-      </div>
-    </div>
-    
-    <script>
-    function showAbout() { document.getElementById('about-modal').classList.remove('hidden'); }
-    function closeAbout() { document.getElementById('about-modal').classList.add('hidden'); }
-    </script>
-    </body></html>"""
-
-@app.post("/login")
-async def login(request: Request, db: Session = Depends(get_db), username: str = Form(...), password: str = Form(...)):
-    user = db.query(User).filter(User.username == username).first()
-    if not user or not verify_password(password, user.password_hash): raise HTTPException(401, "بيانات خاطئة")
-    token = serializer.dumps(user.id)
-    resp = RedirectResponse(url="/dashboard", status_code=302)
-    resp.set_cookie("session_token", token, httponly=True, max_age=86400)
-    log_action(user.id, "LOGIN", "دخول ناجح", request.headers.get("x-forwarded-for", request.client.host))
-    return resp
-
-@app.post("/logout")
-async def logout():
-    resp = RedirectResponse(url="/login", status_code=302)
-    resp.delete_cookie("session_token")
-    return resp
-
 @app.get("/dashboard")
 async def dashboard(user=Depends(get_current_user)):
     return RedirectResponse("/admin/panel" if user.role == Role.ADMIN.value else "/inspect/dashboard", status_code=302)
 
 # ================== لوحة المدير ==================
-@app.get("/admin/panel", response_class=HTMLResponse)
-async def admin_panel(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
-    sessions = db.query(InspectionSession).order_by(InspectionSession.created_at.desc()).all()
-    templates = db.query(FormTemplate).filter(FormTemplate.is_active == True).order_by(FormTemplate.name).all()
-    nav = """<div class="flex flex-wrap gap-2 mb-4">
-      <a href="/admin/users" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">المستخدمين</a>
-      <a href="/admin/form-builder" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">باني النموذج</a>
-      <a href="/admin/templates" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">النماذج المحفوظة</a>
-      <a href="/admin/sections" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">الأقسام</a>
-      <a href="/admin/recommendations" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">التوصيات</a>
-      <a href="/dashboard/stats" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">الإحصائيات</a>
-      <a href="/admin/sessions" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">جميع الجولات</a>
-      <a href="/admin/settings" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">الإعدادات</a>
-      <a href="/admin/logs" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">السجل</a>
-      <form action="/logout" method="post"><button class="bg-red-500 text-white px-3 py-1 rounded text-sm">خروج</button></form></div>"""
-    rows = "".join(f'''<li class="border p-3 rounded flex justify-between items-center bg-white mb-2">
-      <div><span class="font-bold">{s.institution}</span> | {s.visit_date}
-      <div class="text-sm text-gray-500 mt-1">الرمز: <code class="bg-gray-100 px-1">{s.session_code}</code></div></div>
-      <div class="flex gap-2">
-        <a href="/admin/session/{s.id}" class="bg-blue-600 text-white px-3 py-1 rounded text-sm">عرض وتوليد</a>
-        <button onclick="copySessionLink('{request.url.scheme}://{request.headers.get("host", "")}/inspect/{s.session_code}')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">📋 نسخ الرابط</button>
-      </div></li>''' for s in sessions)
-    
-    template_options = "".join(f'<option value="{t.id}">{t.name}</option>' for t in templates)
-    
-    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
-    <div class="max-w-4xl mx-auto"><div class="bg-white p-4 rounded shadow mb-6"><h1 class="text-xl font-bold text-blue-800">👤 لوحة {user.username}</h1>{nav}</div>
-    <div class="bg-white p-4 rounded shadow mb-6"><h2 class="font-bold mb-3">➕ إنشاء جولة تفتيش</h2>
-      <form action="/admin/create" method="post" class="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <input name="institution" placeholder="اسم المؤسسة" required class="p-2 border rounded">
-        <input name="visit_date" type="date" required class="p-2 border rounded">
-        <select name="template_id" class="p-2 border rounded"><option value="">-- اختر نموذجاً (اختياري) --</option>{template_options}</select>
-        <button class="bg-green-600 text-white p-2 rounded">إنشاء + مشاركة الرابط</button></form></div>
-    <div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-3">📋 الجولات النشطة</h2><ul class="space-y-2">{rows}</ul></div></div>
-    <script>
-    function copySessionLink(url) {{
-      navigator.clipboard.writeText(url).then(() => {{
-        alert('تم نسخ رابط الجولة!');
-      }}).catch(err => {{
-        prompt('انسخ الرابط يدوياً:', url);
-      }});
-    }}
-    </script>
-    </body></html>"""
-
-@app.post("/admin/create")
-async def create_session(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)),
-                         institution: str = Form(...), visit_date: str = Form(...), template_id: str = Form(None)):
-    
-    # حفظ الجلسة مع ربطها بالنموذج المختار إن وُجد
-    session = InspectionSession(
-        institution=institution, 
-        visit_date=visit_date, 
-        created_by=user.id,
-        template_id=int(template_id) if template_id else None
-    )
-    db.add(session)
-    db.commit()
-    
-    # تسجيل الإجراء
-    if template_id:
-        template = db.query(FormTemplate).filter(FormTemplate.id == int(template_id)).first()
-        if template:
-            log_action(user.id, "CREATE_SESSION_FROM_TEMPLATE", f"{institution} (Template: {template.name})", request.headers.get("x-forwarded-for", request.client.host))
-        else:
-            log_action(user.id, "CREATE_SESSION", institution, request.headers.get("x-forwarded-for", request.client.host))
-    else:
-        log_action(user.id, "CREATE_SESSION", institution, request.headers.get("x-forwarded-for", request.client.host))
-    
-    return RedirectResponse(url="/admin/panel", status_code=302)
 
 # ================== إدارة المستخدمين ==================
-@app.get("/admin/users", response_class=HTMLResponse)
-async def admin_users(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
-    users = db.query(User).all()
-    rows = "".join(f'''<tr class="border-b"><td class="p-2">{u.username}</td><td class="p-2">{u.role}</td>
-    <td class="p-2">
-    <form action="/admin/users/{u.id}/toggle" method="post" class="inline">
-      <button class="px-2 py-1 rounded text-xs {'bg-green-500 text-white' if u.is_active else 'bg-red-500 text-white'}">{'✅' if u.is_active else '❌'}</button></form></td>
-    <td class="p-2">
-      <a href="/admin/users/{u.id}/edit" class="bg-yellow-500 text-white px-2 py-1 rounded text-xs mr-1">✏️ تعديل</a>
-      {'<form action="/admin/users/'+str(u.id)+'/delete" method="post" class="inline" onsubmit="return confirm(\'حذف؟\')">' if u.id!=user.id else ''}
-      {'<button class="bg-red-600 text-white px-2 py-1 rounded text-xs">حذف</button>' if u.id!=user.id else ''}
-    {'</form>' if u.id!=user.id else ''}</td></tr>''' for u in users)
-    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
-    <div class="max-w-6xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between mb-4"><h1 class="text-xl font-bold">👥 المستخدمون</h1><a href="/admin/panel" class="text-blue-600">← العودة</a></div>
-    
-    <!-- أزرار الإكسل -->
-    <div class="mb-4 flex gap-2">
-      <form action="/admin/users/export" method="get" class="inline">
-        <button class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">📤 تصدير Excel</button>
-      </form>
-      <form action="/admin/users/import" method="post" enctype="multipart/form-data" class="inline flex gap-2">
-        <input type="file" name="file" accept=".xlsx,.xls" required class="p-2 border rounded">
-        <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">📥 استيراد Excel</button>
-      </form>
-    </div>
-    
-    <form action="/admin/users" method="post" class="bg-gray-50 p-4 rounded mb-6 grid grid-cols-2 md:grid-cols-4 gap-2">
-      <input name="username" placeholder="اسم المستخدم" required class="p-2 border rounded">
-      <input name="password" type="password" placeholder="كلمة المرور" required class="p-2 border rounded">
-      <select name="role" class="p-2 border rounded"><option value="supervisor">مشرف</option><option value="inspector">مفتش</option><option value="admin">مدير</option></select>
-      <button class="bg-green-600 text-white p-2 rounded">➕ إضافة</button></form>
-    <table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الاسم</th><th>الدور</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></body></html>"""
-
-@app.post("/admin/users")
-async def create_user(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value)),
-                      username: str = Form(...), password: str = Form(...), role: str = Form("inspector")):
-    if db.query(User).filter(User.username == username).first(): raise HTTPException(400, "موجود")
-    db.add(User(username=username, password_hash=hash_password(password), role=role))
-    db.commit()
-    log_action(user.id, "CREATE_USER", username, request.headers.get("x-forwarded-for", request.client.host))
-    return RedirectResponse(url="/admin/users", status_code=302)
-
-@app.post("/admin/users/{uid}/toggle")
-async def toggle_user(uid: int, request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value))):
-    u = db.query(User).filter(User.id == uid).first()
-    if u and u.id != user.id: u.is_active = not u.is_active; db.commit()
-    return RedirectResponse(url="/admin/users", status_code=302)
-
-@app.post("/admin/users/{uid}/delete")
-async def delete_user(uid: int, request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value))):
-    u = db.query(User).filter(User.id == uid).first()
-    if u and u.id != user.id: db.delete(u); db.commit()
-    return RedirectResponse(url="/admin/users", status_code=302)
-
-@app.get("/admin/users/{uid}/edit", response_class=HTMLResponse)
-async def edit_user_page(uid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
-    u = db.query(User).filter(User.id == uid).first()
-    if not u: raise HTTPException(404)
-    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-gray-50 p-4"><div class="max-w-md mx-auto bg-white p-6 rounded shadow"><h1 class="text-xl font-bold mb-4">✏️ تعديل: {u.username}</h1>
-    <form action="/admin/users/{uid}/edit" method="post" class="space-y-3">
-      <input name="username" value="{u.username}" required class="w-full p-2 border rounded">
-      <input name="password" type="password" placeholder="اتركه فارغاً إذا لم ترد تغييره" class="w-full p-2 border rounded">
-      <select name="role" class="w-full p-2 border rounded"><option value="supervisor" {'selected' if u.role=='supervisor' else ''}>مشرف</option><option value="inspector" {'selected' if u.role=='inspector' else ''}>مفتش</option><option value="admin" {'selected' if u.role=='admin' else ''}>مدير</option></select>
-      <button class="w-full bg-blue-600 text-white py-2 rounded">💾 حفظ</button></form><a href="/admin/users" class="block text-center mt-4 text-gray-500">← إلغاء</a></div></body></html>"""
-
-@app.post("/admin/users/{uid}/edit")
-async def edit_user_submit(uid: int, request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value)),
-                           username: str = Form(...), password: str = Form(""), role: str = Form("inspector")):
-    u = db.query(User).filter(User.id == uid).first()
-    if not u: raise HTTPException(404)
-    if u.id != user.id and username != u.username and db.query(User).filter(User.username == username).first(): raise HTTPException(400, "اسم المستخدم مستخدم")
-    u.username = username; u.role = role
-    if password.strip(): u.password_hash = hash_password(password)
-    db.commit()
-    log_action(user.id, "EDIT_USER", f"تعديل: {username}", request.headers.get("x-forwarded-for", request.client.host))
-    return RedirectResponse(url="/admin/users", status_code=302)
 
 # ================== باني النموذج ==================
 @app.get("/admin/form-builder", response_class=HTMLResponse)
@@ -825,32 +621,6 @@ async def admin_logs(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-50 p-4"><div class="max-w-5xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between mb-4"><h1 class="text-xl font-bold">📜 السجل</h1><div><a href="/admin/logs/export" class="bg-green-600 text-white px-3 py-1 rounded text-sm mr-2">📥 Excel</a><a href="/admin/panel" class="text-blue-600">← العودة</a></div></div>
     <div class="overflow-x-auto"><table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الوقت</th><th>المستخدم</th><th>الإجراء</th><th>التفاصيل</th></tr></thead><tbody>{rows}</tbody></table></div></div></body></html>"""
-
-@app.get("/admin/sessions", response_class=HTMLResponse)
-async def admin_sessions(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
-    sessions = db.query(InspectionSession).order_by(InspectionSession.created_at.desc()).all()
-    rows = "".join(f'''<tr class="border-b"><td class="p-2">{s.institution}</td><td class="p-2">{s.visit_date}</td>
-    <td class="p-2"><code class="bg-gray-100 px-1">{s.session_code}</code></td>
-    <td class="p-2"><span class="px-2 py-1 rounded text-xs {'bg-green-100 text-green-800' if s.status=='open' else 'bg-red-100 text-red-800'}">{'✅ نشطة' if s.status=='open' else '❌ مغلقة'}</span></td>
-    <td class="p-2">
-      <form action="/admin/sessions/{s.id}/toggle" method="post" class="inline">
-        <button class="px-2 py-1 rounded text-xs {'bg-yellow-500 text-white' if s.status=='open' else 'bg-green-500 text-white'}">{'🔒 إغلاق' if s.status=='open' else '🔓 فتح'}</button>
-      </form>
-      <a href="/admin/session/{s.id}" class="bg-blue-600 text-white px-2 py-1 rounded text-xs mr-1">عرض</a>
-    </td></tr>''' for s in sessions)
-    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-gray-50 p-4"><div class="max-w-6xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between mb-4"><h1 class="text-xl font-bold">📋 جميع الجولات</h1><a href="/admin/panel" class="text-blue-600">← العودة</a></div>
-    <p class="text-sm text-gray-600 mb-4">يمكنك إغلاق الجولة لمنع المفتشين من إضافة ردود جديدة، أو فتحها للسماح بالإضافة.</p>
-    <div class="overflow-x-auto"><table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">المؤسسة</th><th>تاريخ الزيارة</th><th>رمز الجولة</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></div></body></html>"""
-
-@app.post("/admin/sessions/{sid}/toggle")
-async def toggle_session_status(sid: int, request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value))):
-    s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
-    if s:
-        s.status = "closed" if s.status == "open" else "open"
-        db.commit()
-        log_action(user.id, "TOGGLE_SESSION", f"تغيير حالة الجولة {s.institution} إلى {s.status}", request.headers.get("x-forwarded-for", request.client.host))
-    return RedirectResponse(url="/admin/sessions", status_code=302)
 
 @app.get("/admin/logs/export")
 async def export_logs(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
