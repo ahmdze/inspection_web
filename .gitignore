@@ -5,7 +5,28 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Database
+inspection.db
+
+# Dependencies
+.venv/
+venv/
+env/
+
 # Logs
 *.log
-server.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
 ```

@@ -47,7 +47,8 @@ async def login_page(request: Request):
     
     <!-- رسالة الخطأ -->
     <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4 text-center">
-      <p class="font-bold">⚠️ حدث خطأ يجب تسجيل الدخول</p>
+      <p class="font-bold mb-2">⚠️ حدث خطأ يجب تسجيل الدخول</p>
+      <p class="text-sm">للمتابعة والوصول إلى الجولة، يرجى تسجيل الدخول أولاً</p>
     </div>
     
     <form action="/login" method="post" class="space-y-4">
@@ -58,7 +59,7 @@ async def login_page(request: Request):
       <input type="checkbox" id="remember" name="remember" class="ml-2">
       <label for="remember" class="text-sm text-gray-600">حفظ معلومات الدخول</label>
     </div>
-    <button class="w-full bg-blue-600 text-white py-2 rounded">دخول</button></form>
+    <button class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-bold">🔐 تسجيل الدخول للمتابعة</button></form>
     <div class="mt-4 text-center space-y-2">
       <a href="/register" class="text-blue-600 hover:underline text-sm">👤 تسجيل حساب جديد</a>
       <button onclick="showAbout()" class="text-blue-600 hover:underline text-sm">ℹ️ حول</button>
