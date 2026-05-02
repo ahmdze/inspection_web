@@ -1,6 +1,6 @@
 import os, json, io
 from enum import Enum
-from fastapi import FastAPI, Request, Depends, Form, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, Request, Depends, Form, HTTPException, BackgroundTasks, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -56,10 +56,49 @@ async def root(): return RedirectResponse(url="/login", status_code=302)
 async def login_page():
     return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
-    <div class="max-w-md mx-auto bg-white p-6 rounded shadow mt-10"><h1 class="text-xl font-bold text-blue-800 mb-4 text-center">تسجيل الدخول</h1>
-    <form action="/login" method="post" class="space-y-4"><input name="username" placeholder="اسم المستخدم" required class="w-full p-2 border rounded">
+    <div class="max-w-md mx-auto bg-white p-6 rounded shadow mt-10">
+    <h1 class="text-2xl font-bold text-blue-800 mb-2 text-center">نظام التفتيش الذكي المتقدم</h1>
+    <p class="text-gray-500 text-center mb-4">إصدار 1.0</p>
+    <form action="/login" method="post" class="space-y-4">
+    <input name="username" placeholder="اسم المستخدم" required class="w-full p-2 border rounded">
     <input name="password" type="password" placeholder="كلمة المرور" required class="w-full p-2 border rounded">
-    <button class="w-full bg-blue-600 text-white py-2 rounded">دخول</button></form></div></body></html>"""
+    <div class="flex items-center">
+      <input type="checkbox" id="remember" name="remember" class="ml-2">
+      <label for="remember" class="text-sm text-gray-600">حفظ معلومات الدخول</label>
+    </div>
+    <button class="w-full bg-blue-600 text-white py-2 rounded">دخول</button></form>
+    <div class="mt-4 text-center">
+      <button onclick="showAbout()" class="text-blue-600 hover:underline text-sm">ℹ️ حول</button>
+    </div>
+    </div>
+    
+    <!-- نافذة حول -->
+    <div id="about-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white p-6 rounded-lg max-w-md mx-4 shadow-xl">
+        <h2 class="text-xl font-bold text-blue-800 mb-4 text-center">معلومات المطور</h2>
+        <div class="space-y-3 text-right">
+          <div class="flex items-center gap-2">
+            <span class="text-gray-600 font-bold">الاسم:</span>
+            <span>تقني طبي - احمد زياد رحيمه</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-gray-600 font-bold">الهاتف:</span>
+            <a href="tel:07723064622" class="text-blue-600 hover:underline">07723064622</a>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-gray-600 font-bold">البريد:</span>
+            <a href="mailto:ahmdze@gmail.com" class="text-blue-600 hover:underline">ahmdze@gmail.com</a>
+          </div>
+        </div>
+        <button onclick="closeAbout()" class="mt-6 w-full bg-gray-600 text-white py-2 rounded">إغلاق</button>
+      </div>
+    </div>
+    
+    <script>
+    function showAbout() { document.getElementById('about-modal').classList.remove('hidden'); }
+    function closeAbout() { document.getElementById('about-modal').classList.add('hidden'); }
+    </script>
+    </body></html>"""
 
 @app.post("/login")
 async def login(request: Request, db: Session = Depends(get_db), username: str = Form(...), password: str = Form(...)):
@@ -93,13 +132,17 @@ async def admin_panel(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISO
       <a href="/admin/sections" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">الأقسام</a>
       <a href="/admin/recommendations" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">التوصيات</a>
       <a href="/dashboard/stats" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">الإحصائيات</a>
+      <a href="/admin/sessions" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">جميع الجولات</a>
       <a href="/admin/settings" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">الإعدادات</a>
       <a href="/admin/logs" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">السجل</a>
       <form action="/logout" method="post"><button class="bg-red-500 text-white px-3 py-1 rounded text-sm">خروج</button></form></div>"""
     rows = "".join(f'''<li class="border p-3 rounded flex justify-between items-center bg-white mb-2">
       <div><span class="font-bold">{s.institution}</span> | {s.visit_date}
       <div class="text-sm text-gray-500 mt-1">الرمز: <code class="bg-gray-100 px-1">{s.session_code}</code></div></div>
-      <a href="/admin/session/{s.id}" class="bg-blue-600 text-white px-3 py-1 rounded text-sm">عرض وتوليد</a></li>''' for s in sessions)
+      <div class="flex gap-2">
+        <a href="/admin/session/{s.id}" class="bg-blue-600 text-white px-3 py-1 rounded text-sm">عرض وتوليد</a>
+        <button onclick="copySessionLink('{request.url.scheme}://{request.headers.get("host", "")}/inspect/{s.session_code}')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">📋 نسخ الرابط</button>
+      </div></li>''' for s in sessions)
     
     template_options = "".join(f'<option value="{t.id}">{t.name}</option>' for t in templates)
     
@@ -112,7 +155,17 @@ async def admin_panel(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISO
         <input name="visit_date" type="date" required class="p-2 border rounded">
         <select name="template_id" class="p-2 border rounded"><option value="">-- اختر نموذجاً (اختياري) --</option>{template_options}</select>
         <button class="bg-green-600 text-white p-2 rounded">إنشاء + مشاركة الرابط</button></form></div>
-    <div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-3">📋 الجولات النشطة</h2><ul class="space-y-2">{rows}</ul></div></div></body></html>"""
+    <div class="bg-white p-4 rounded shadow"><h2 class="font-bold mb-3">📋 الجولات النشطة</h2><ul class="space-y-2">{rows}</ul></div></div>
+    <script>
+    function copySessionLink(url) {{
+      navigator.clipboard.writeText(url).then(() => {{
+        alert('تم نسخ رابط الجولة!');
+      }}).catch(err => {{
+        prompt('انسخ الرابط يدوياً:', url);
+      }});
+    }}
+    </script>
+    </body></html>"""
 
 @app.post("/admin/create")
 async def create_session(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)),
@@ -145,7 +198,7 @@ async def create_session(request: Request, db: Session = Depends(get_db), user=D
 async def admin_users(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     users = db.query(User).all()
     rows = "".join(f'''<tr class="border-b"><td class="p-2">{u.username}</td><td class="p-2">{u.role}</td>
-    <td class="p-2">{u.assigned_unit or '-'}</td><td class="p-2">
+    <td class="p-2">
     <form action="/admin/users/{u.id}/toggle" method="post" class="inline">
       <button class="px-2 py-1 rounded text-xs {'bg-green-500 text-white' if u.is_active else 'bg-red-500 text-white'}">{'✅' if u.is_active else '❌'}</button></form></td>
     <td class="p-2">
@@ -154,20 +207,31 @@ async def admin_users(user=Depends(require_role(Role.ADMIN.value)), db: Session 
       {'<button class="bg-red-600 text-white px-2 py-1 rounded text-xs">حذف</button>' if u.id!=user.id else ''}
     {'</form>' if u.id!=user.id else ''}</td></tr>''' for u in users)
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
-    <div class="max-w-4xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between mb-4"><h1 class="text-xl font-bold">👥 المستخدمون</h1><a href="/admin/panel" class="text-blue-600">← العودة</a></div>
-    <form action="/admin/users" method="post" class="bg-gray-50 p-4 rounded mb-6 grid grid-cols-2 md:grid-cols-5 gap-2">
+    <div class="max-w-6xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between mb-4"><h1 class="text-xl font-bold">👥 المستخدمون</h1><a href="/admin/panel" class="text-blue-600">← العودة</a></div>
+    
+    <!-- أزرار الإكسل -->
+    <div class="mb-4 flex gap-2">
+      <form action="/admin/users/export" method="get" class="inline">
+        <button class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">📤 تصدير Excel</button>
+      </form>
+      <form action="/admin/users/import" method="post" enctype="multipart/form-data" class="inline flex gap-2">
+        <input type="file" name="file" accept=".xlsx,.xls" required class="p-2 border rounded">
+        <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">📥 استيراد Excel</button>
+      </form>
+    </div>
+    
+    <form action="/admin/users" method="post" class="bg-gray-50 p-4 rounded mb-6 grid grid-cols-2 md:grid-cols-4 gap-2">
       <input name="username" placeholder="اسم المستخدم" required class="p-2 border rounded">
       <input name="password" type="password" placeholder="كلمة المرور" required class="p-2 border rounded">
       <select name="role" class="p-2 border rounded"><option value="supervisor">مشرف</option><option value="inspector">مفتش</option><option value="admin">مدير</option></select>
-      <input name="unit" placeholder="الوحدة" class="p-2 border rounded">
       <button class="bg-green-600 text-white p-2 rounded">➕ إضافة</button></form>
-    <table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الاسم</th><th>الدور</th><th>الوحدة</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></body></html>"""
+    <table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الاسم</th><th>الدور</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></body></html>"""
 
 @app.post("/admin/users")
 async def create_user(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value)),
-                      username: str = Form(...), password: str = Form(...), role: str = Form("inspector"), unit: str = Form("")):
+                      username: str = Form(...), password: str = Form(...), role: str = Form("inspector")):
     if db.query(User).filter(User.username == username).first(): raise HTTPException(400, "موجود")
-    db.add(User(username=username, password_hash=hash_password(password), role=role, assigned_unit=unit))
+    db.add(User(username=username, password_hash=hash_password(password), role=role))
     db.commit()
     log_action(user.id, "CREATE_USER", username, request.headers.get("x-forwarded-for", request.client.host))
     return RedirectResponse(url="/admin/users", status_code=302)
@@ -194,16 +258,15 @@ async def edit_user_page(uid: int, user=Depends(require_role(Role.ADMIN.value)),
       <input name="username" value="{u.username}" required class="w-full p-2 border rounded">
       <input name="password" type="password" placeholder="اتركه فارغاً إذا لم ترد تغييره" class="w-full p-2 border rounded">
       <select name="role" class="w-full p-2 border rounded"><option value="supervisor" {'selected' if u.role=='supervisor' else ''}>مشرف</option><option value="inspector" {'selected' if u.role=='inspector' else ''}>مفتش</option><option value="admin" {'selected' if u.role=='admin' else ''}>مدير</option></select>
-      <input name="unit" value="{u.assigned_unit or ''}" placeholder="الوحدة" class="w-full p-2 border rounded">
       <button class="w-full bg-blue-600 text-white py-2 rounded">💾 حفظ</button></form><a href="/admin/users" class="block text-center mt-4 text-gray-500">← إلغاء</a></div></body></html>"""
 
 @app.post("/admin/users/{uid}/edit")
 async def edit_user_submit(uid: int, request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value)),
-                           username: str = Form(...), password: str = Form(""), role: str = Form("inspector"), unit: str = Form("")):
+                           username: str = Form(...), password: str = Form(""), role: str = Form("inspector")):
     u = db.query(User).filter(User.id == uid).first()
     if not u: raise HTTPException(404)
     if u.id != user.id and username != u.username and db.query(User).filter(User.username == username).first(): raise HTTPException(400, "اسم المستخدم مستخدم")
-    u.username = username; u.role = role; u.assigned_unit = unit
+    u.username = username; u.role = role
     if password.strip(): u.password_hash = hash_password(password)
     db.commit()
     log_action(user.id, "EDIT_USER", f"تعديل: {username}", request.headers.get("x-forwarded-for", request.client.host))
@@ -763,6 +826,32 @@ async def admin_logs(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR
     <body class="bg-gray-50 p-4"><div class="max-w-5xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between mb-4"><h1 class="text-xl font-bold">📜 السجل</h1><div><a href="/admin/logs/export" class="bg-green-600 text-white px-3 py-1 rounded text-sm mr-2">📥 Excel</a><a href="/admin/panel" class="text-blue-600">← العودة</a></div></div>
     <div class="overflow-x-auto"><table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">الوقت</th><th>المستخدم</th><th>الإجراء</th><th>التفاصيل</th></tr></thead><tbody>{rows}</tbody></table></div></div></body></html>"""
 
+@app.get("/admin/sessions", response_class=HTMLResponse)
+async def admin_sessions(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
+    sessions = db.query(InspectionSession).order_by(InspectionSession.created_at.desc()).all()
+    rows = "".join(f'''<tr class="border-b"><td class="p-2">{s.institution}</td><td class="p-2">{s.visit_date}</td>
+    <td class="p-2"><code class="bg-gray-100 px-1">{s.session_code}</code></td>
+    <td class="p-2"><span class="px-2 py-1 rounded text-xs {'bg-green-100 text-green-800' if s.status=='open' else 'bg-red-100 text-red-800'}">{'✅ نشطة' if s.status=='open' else '❌ مغلقة'}</span></td>
+    <td class="p-2">
+      <form action="/admin/sessions/{s.id}/toggle" method="post" class="inline">
+        <button class="px-2 py-1 rounded text-xs {'bg-yellow-500 text-white' if s.status=='open' else 'bg-green-500 text-white'}">{'🔒 إغلاق' if s.status=='open' else '🔓 فتح'}</button>
+      </form>
+      <a href="/admin/session/{s.id}" class="bg-blue-600 text-white px-2 py-1 rounded text-xs mr-1">عرض</a>
+    </td></tr>''' for s in sessions)
+    return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
+    <body class="bg-gray-50 p-4"><div class="max-w-6xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between mb-4"><h1 class="text-xl font-bold">📋 جميع الجولات</h1><a href="/admin/panel" class="text-blue-600">← العودة</a></div>
+    <p class="text-sm text-gray-600 mb-4">يمكنك إغلاق الجولة لمنع المفتشين من إضافة ردود جديدة، أو فتحها للسماح بالإضافة.</p>
+    <div class="overflow-x-auto"><table class="w-full text-right"><thead class="bg-gray-100"><tr><th class="p-2">المؤسسة</th><th>تاريخ الزيارة</th><th>رمز الجولة</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{rows}</tbody></table></div></div></body></html>"""
+
+@app.post("/admin/sessions/{sid}/toggle")
+async def toggle_session_status(sid: int, request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value))):
+    s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
+    if s:
+        s.status = "closed" if s.status == "open" else "open"
+        db.commit()
+        log_action(user.id, "TOGGLE_SESSION", f"تغيير حالة الجولة {s.institution} إلى {s.status}", request.headers.get("x-forwarded-for", request.client.host))
+    return RedirectResponse(url="/admin/sessions", status_code=302)
+
 @app.get("/admin/logs/export")
 async def export_logs(user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
     logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
@@ -856,7 +945,7 @@ async def inspect_form(code: str, user=Depends(get_current_user), db: Session = 
     <div class="max-w-2xl mx-auto bg-white p-6 rounded shadow">
       <div class="bg-blue-600 text-white p-4 rounded-t -mx-6 -mt-6 mb-6">
         <h1 class="text-xl font-bold">{sess.institution} | {sess.visit_date}</h1>
-        <p class="text-sm opacity-90 mt-1">المفتش: {user.username} | {user.assigned_unit or 'مفتش'}</p>
+        <p class="text-sm opacity-90 mt-1">المفتش: {user.username} | مفتش</p>
       </div>
       
       <div class="mb-6">
@@ -866,7 +955,7 @@ async def inspect_form(code: str, user=Depends(get_current_user), db: Session = 
       
       <form action="/inspect/submit" method="post" class="space-y-4" novalidate>
         <input type="hidden" name="session_id" value="{sess.id}">
-        <input type="hidden" name="unit_name" value="{user.assigned_unit or 'مفتش'}">
+        <input type="hidden" name="unit_name" value="مفتش">
         {sections_html}
         <button type="submit" class="w-full bg-green-600 text-white py-3 rounded font-bold text-lg hover:bg-green-700">✅ حفظ الإجابات</button>
       </form>
@@ -907,16 +996,67 @@ async def submit_dynamic(request: Request, db: Session = Depends(get_db), user=D
 
 # ================== توليد التقرير الموحد ==================
 @app.get("/admin/session/{sid}", response_class=HTMLResponse)
-async def view_session(sid: int, user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
+async def view_session(sid: int, request: Request, user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
     s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
     if not s: raise HTTPException(404)
     subs = db.query(Submission).filter(Submission.session_id == sid).all()
-    rows = "".join(f'<div class="border p-3 rounded mb-2"><b>{sub.unit_name}</b><pre class="mt-2 text-sm whitespace-pre-wrap">{sub.answers_json}</pre></div>' for sub in subs)
+    
+    # جلب جميع الحقول لمعرفة الأقسام
+    all_fields = db.query(FormField).all()
+    field_map = {f.field_key: f for f in all_fields}
+    all_sections = db.query(Section).all()
+    section_map = {sec.id: sec for sec in all_sections}
+    
+    rows = ""
+    for sub in subs:
+        inspector = db.query(User).filter(User.id == sub.user_id).first()
+        inspector_name = inspector.username if inspector else "مفتش مجهول"
+        
+        # تجميع الأقسام التي تم الإجابة عنها
+        ans = json.loads(sub.answers_json)
+        sections_answered = set()
+        for k in ans.keys():
+            if k.startswith("rec_enable_"):
+                continue
+            field = field_map.get(k)
+            if field and field.section_id:
+                section = section_map.get(field.section_id)
+                if section:
+                    # الحصول على القسم الرئيسي (بدون الآباء الفرعية)
+                    parent_section = section
+                    while parent_section.parent_id:
+                        parent_section = section_map.get(parent_section.parent_id)
+                        if not parent_section:
+                            break
+                    sections_answered.add(parent_section.name if parent_section else section.name)
+        
+        sections_list = "، ".join(sections_answered) if sections_answered else "لا يوجد"
+        rows += f'<div class="border p-3 rounded mb-2 bg-gray-50"><div class="font-bold text-blue-700 mb-2">👤 {inspector_name}</div><div class="text-sm text-gray-600">📋 الأقسام المجابة: <span class="font-medium">{sections_list}</span></div></div>'
+    
+    # رابط الجولة
+    session_url = request.url.scheme + "://" + request.headers.get("host", "") + "/inspect/" + s.session_code
+    
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-50 p-4"><div class="max-w-4xl mx-auto bg-white p-6 rounded shadow"><h1 class="text-xl font-bold mb-4">{s.institution} | {s.visit_date}</h1>
-    <p class="mb-4">رابط: <a href="/inspect/{s.session_code}" class="text-blue-600">/inspect/{s.session_code}</a></p>
+    <div class="mb-4 p-3 bg-blue-50 rounded border border-blue-200 flex justify-between items-center">
+      <div class="flex-1 mr-3 overflow-hidden">
+        <p class="text-sm text-gray-600 mb-1">رابط الجولة:</p>
+        <code id="session-url" class="text-blue-700 break-all">{session_url}</code>
+      </div>
+      <button onclick="copyLink()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm whitespace-nowrap">📋 نسخ الرابط</button>
+    </div>
+    <script>
+    function copyLink() {{
+      const url = document.getElementById('session-url').textContent;
+      navigator.clipboard.writeText(url).then(() => {{
+        alert('تم نسخ الرابط!');
+      }}).catch(err => {{
+        prompt('انسخ الرابط يدوياً:', url);
+      }});
+    }}
+    </script>
     <div class="mb-4 max-h-96 overflow-y-auto p-2 border rounded">{rows if rows else '<p class="text-gray-500">لا توجد إجابات بعد</p>'}</div>
-    <form action="/generate/{sid}" method="post"><button class="w-full bg-indigo-600 text-white py-3 rounded font-bold">📥 توليد تقرير Word</button></form></div></body></html>"""
+    <form action="/generate/{sid}" method="post"><button class="w-full bg-indigo-600 text-white py-3 rounded font-bold">📅 توليد تقرير Word</button></form></div></body></html>"""
 
 @app.post("/generate/{sid}")
 async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value, Role.SUPERVISOR.value)), db: Session = Depends(get_db)):
@@ -1021,6 +1161,72 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value, 
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=os.path.basename(path)
     )
+
+# ================== تصدير واستيراد المستخدمين ==================
+@app.get("/admin/users/export")
+async def export_users(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    data = [{"username": u.username, "password": "123456", "role": u.role, "is_active": u.is_active} for u in users]
+    df = pd.DataFrame(data)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="المستخدمون")
+    output.seek(0)
+    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=users.xlsx"})
+
+@app.post("/admin/users/import")
+async def import_users(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value)), file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        df = pd.read_excel(io.BytesIO(contents))
+        
+        # التحقق من الأعمدة المطلوبة
+        required_cols = ["username", "role"]
+        if not all(col in df.columns for col in required_cols):
+            raise HTTPException(400, "يجب أن يحتوي الملف على أعمدة: username, role")
+        
+        count_created = 0
+        count_updated = 0
+        
+        for _, row in df.iterrows():
+            username = str(row["username"]).strip()
+            role = str(row.get("role", "inspector")).strip()
+            is_active = row.get("is_active", True)
+            password = str(row.get("password", "")).strip()
+            
+            # التحقق من صحة الدور
+            if role not in ["admin", "supervisor", "inspector"]:
+                role = "inspector"
+            
+            existing = db.query(User).filter(User.username == username).first()
+            if existing:
+                # تحديث المستخدم الموجود
+                existing.role = role
+                if pd.notna(is_active):
+                    existing.is_active = bool(is_active)
+                # تحديث كلمة المرور إذا كانت موجودة في الملف
+                if password:
+                    existing.password_hash = hash_password(password)
+                count_updated += 1
+            else:
+                # إنشاء مستخدم جديد بكلمة مرور من الملف أو افتراضية
+                new_password = password if password else "123456"
+                db.add(User(username=username, password_hash=hash_password(new_password), role=role))
+                count_created += 1
+        
+        db.commit()
+        log_action(user.id, "IMPORT_USERS", f"تم استيراد {count_created} مستخدم جديد وتحديث {count_updated}", request.headers.get("x-forwarded-for", request.client.host))
+        
+        return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script></head>
+        <body class="bg-gray-50 p-4 flex items-center justify-center h-screen">
+        <div class="bg-white p-8 rounded shadow text-center">
+        <h1 class="text-2xl font-bold text-green-600 mb-4">✅ تم الاستيراد بنجاح</h1>
+        <p class="mb-4">📥 مستخدمين جدد: {count_created}<br>🔄 تم التحديث: {count_updated}</p>
+        <p class="text-sm text-gray-500 mb-4">كلمة المرور الافتراضية للمستخدمين الجدد: <code>123456</code></p>
+        <a href="/admin/users" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة للمستخدمين</a>
+        </div></body></html>"""
+    except Exception as e:
+        raise HTTPException(500, f"خطأ في الاستيراد: {str(e)}")
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
