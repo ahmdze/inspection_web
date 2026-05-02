@@ -141,9 +141,11 @@ def build_web_report(data: dict, output_folder: str) -> str:
             # Add sub-title (e.g., أ/, ب/, etc.) without the category description
             sub_title = cat["label"].split(":")[0] + ":"
             _add_title(doc, sub_title, 14)
-            for item in items:
+            # Add numbered list for recommendations under each sub-title
+            for idx, item in enumerate(items, start=1):
                 p = doc.add_paragraph()
                 set_rtl_and_justify(p)
+                set_font_style(p.add_run(f"{idx}. "), size=12, bold=True)
                 set_font_style(p.add_run(str(item).strip()), size=12)
             doc.add_paragraph(" ")
 
