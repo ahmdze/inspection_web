@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from datetime import datetime
+from password_utils import encrypt_password
 
 router = APIRouter()
 
@@ -85,11 +86,16 @@ async def inspector_dashboard(request: Request, db: Session = Depends(get_db)):
         <h2 class="text-xl font-bold mb-4">📋 الجولات النشطة</h2>
         <ul class="space-y-2">{rows}</ul>
       </div>
-    </div></body></html>""".replace("{format_date(s.visit_date)}", format_date(s.visit_date))
+    </div></body></html>"""
+
+@router.get("/inspect/profile", response_class=HTMLResponse)
+async def inspector_profile_route(request: Request, db: Session = Depends(get_db)):
+    return await inspector_profile(request, db)
 
 @router.get("/inspect/{code}", response_class=HTMLResponse)
 async def inspect_form(code: str, request: Request, db: Session = Depends(get_db)):
-    from database import InspectionSession, RecommendationCategory, Section, FormField
+    from database import InspectionSession, RecommendationCategory, Section, FormField, FormTemplate
+    import json
     
     user = get_current_user(request, db)
     
@@ -147,6 +153,63 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
     
     # بناء قائمة الأقسام للاختيار
     section_opts = "".join(f'<option value="sec-{s.id}">{s.name}</option>' for s in root_sections)
+
+    template = db.query(FormTemplate).filter(FormTemplate.id == sess.template_id, FormTemplate.is_active == True).first() if sess.template_id else None
+    if template:
+        try:
+            template_sections = json.loads(template.sections_json)
+        except:
+            template_sections = {}
+
+        children_by_parent = {}
+        for sec_id, sec in template_sections.items():
+            children_by_parent.setdefault(sec.get("parent_id"), []).append((sec_id, sec))
+        for children in children_by_parent.values():
+            children.sort(key=lambda item: item[1].get("order", 0))
+
+        def render_template_field(f):
+            field_key = f.get("field_key", "")
+            label = f.get("label", "")
+            field_type = f.get("field_type", "text")
+            is_required = f.get("is_required", False)
+            options_json = f.get("options_json")
+            has_recommendations = f.get("has_recommendations", False)
+
+            if field_type == "textarea":
+                inp = f'<textarea name="{field_key}" placeholder="{label}" {"required" if is_required else ""} class="w-full p-3 border rounded h-24 focus:ring-2 focus:ring-blue-500"></textarea>'
+            elif field_type == "select" and options_json:
+                try:
+                    opts = json.loads(options_json)
+                except:
+                    opts = []
+                inp = f'<select name="{field_key}" {"required" if is_required else ""} class="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500"><option value="">ط§ط®طھط±...</option>' + ''.join(f'<option value="{o}">{o}</option>' for o in opts) + '</select>'
+            else:
+                inp = f'<input name="{field_key}" type="{field_type}" placeholder="{label}" {"required" if is_required else ""} class="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500">'
+
+            html = f'<div class="mb-6 p-4 bg-white rounded border"><label class="block font-bold text-lg mb-2">{label}</label>{inp}'
+            if has_recommendations and rec_cats_list:
+                html += f'<div class="mt-4 pt-4 border-t bg-green-50 p-3 rounded"><p class="font-bold text-green-800 mb-2">ًں’، ط§ظ„طھظˆطµظٹط§طھ ظ„ظ‡ط°ط§ ط§ظ„ط¨ظ†ط¯</p>'
+                for cat in rec_cats_list:
+                    html += f'<div class="mb-3"><label class="flex items-start gap-2 cursor-pointer"><input type="checkbox" name="rec_enable_{field_key}_{cat["key"]}" class="mt-1 rounded" onchange="document.getElementById(\'rec_{field_key}_{cat["key"]}\').classList.toggle(\'hidden\',!this.checked)"> <span class="font-medium text-sm">{cat["label"]}</span></label><textarea id="rec_{field_key}_{cat["key"]}" name="rec_{field_key}_{cat["key"]}" placeholder="ط§ظƒطھط¨ ط§ظ„طھظپط§طµظٹظ„ ظ‡ظ†ط§..." class="w-full p-2 border rounded h-16 mt-2 hidden"></textarea></div>'
+                html += '</div>'
+            return html + '</div>'
+
+        def build_template_section(sec_id, sec):
+            html = ""
+            for f in sorted(sec.get("fields", []), key=lambda item: item.get("order", 0)):
+                html += render_template_field(f)
+            for child_id, child in children_by_parent.get(int(sec_id), []):
+                html += f'<h3 class="text-lg font-bold mt-6 pt-4 border-t text-blue-700">ًں“Œ {child.get("name", "")}</h3>'
+                html += build_template_section(child_id, child)
+            return html
+
+        template_roots = children_by_parent.get(None, [])
+        sections_html = ""
+        for sec_id, section in template_roots:
+            sections_html += f'<div id="sec-{sec_id}" class="section-content hidden"><h2 class="text-2xl font-bold mb-4 pb-2 border-b text-blue-800">{section.get("name", "")}</h2>'
+            sections_html += build_template_section(sec_id, section)
+            sections_html += '</div>'
+        section_opts = "".join(f'<option value="sec-{sec_id}">{section.get("name", "")}</option>' for sec_id, section in template_roots)
 
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head>
@@ -226,14 +289,13 @@ async def inspector_profile(request: Request, db: Session = Depends(get_db)):
       <a href="/inspect/dashboard" class="block text-center mt-4 text-gray-500">← العودة للوحة</a>
     </div></body></html>"""
 
-@router.post("/inspect/profile")
+@router.post("/inspect/profile", response_class=HTMLResponse)
 async def update_inspector_profile(request: Request, db: Session = Depends(get_db),
                                    username: str = Form(...), password: str = Form("")):
     from database import User, AuditLog
     from datetime import datetime
-    import hashlib
     
-    def hash_password(pw): return hashlib.sha256(pw.encode()).hexdigest()
+    def hash_password(pw): return encrypt_password(pw)
     
     current_user = get_current_user(request, db)
     if current_user.role not in ["inspector"]:

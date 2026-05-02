@@ -1,12 +1,14 @@
-import os, json, io
+import os, json, io, html
 from enum import Enum
 from fastapi import FastAPI, Request, Depends, Form, HTTPException, BackgroundTasks, Query, UploadFile, File
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
-import hashlib
+from password_utils import encrypt_password, export_password, verify_password
 from itsdangerous import URLSafeTimedSerializer
 from database import SessionLocal, User, InspectionSession, Submission, FormField, SystemSetting, AuditLog, RecommendationCategory, Section, FormTemplate
 from notifications import notify_async
@@ -15,7 +17,7 @@ from report_generator import build_web_report
 import pandas as pd
 from pages import auth_router, admin_panel_router, admin_users_router, admin_sessions_router, inspector_router
 
-app = FastAPI(title="نظام التفتيش الذكي المتقدم")
+app = FastAPI(title="نظام التفتيش الذكي المتقدم", default_response_class=HTMLResponse)
 serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
 
 # تضمين المسارات من الملفات المنفصلة
@@ -25,8 +27,34 @@ app.include_router(admin_users_router)
 app.include_router(admin_sessions_router)
 app.include_router(inspector_router)
 
-def hash_password(pw: str) -> str: return hashlib.sha256(pw.encode()).hexdigest()
-def verify_password(pw: str, h: str) -> bool: return hash_password(pw) == h
+def hash_password(pw: str) -> str: return encrypt_password(pw)
+
+def message_page(title: str, message: str, status_code: int = 200, back_url: str = "/dashboard", kind: str = "info"):
+    colors = {
+        "success": ("green", "✅"),
+        "error": ("red", "⚠️"),
+        "warning": ("yellow", "تنبيه"),
+        "info": ("blue", "ℹ️"),
+    }
+    color, icon = colors.get(kind, colors["info"])
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white max-w-md w-full p-6 rounded-lg shadow text-center border-t-4 border-{color}-500">
+      <div class="text-4xl mb-3">{icon}</div>
+      <h1 class="text-2xl font-bold text-{color}-700 mb-3">{html.escape(str(title))}</h1>
+      <p class="text-gray-700 leading-7 mb-6">{html.escape(str(message))}</p>
+      <a href="{html.escape(back_url)}" class="inline-block bg-{color}-600 hover:bg-{color}-700 text-white px-6 py-2 rounded">العودة</a>
+    </div></body></html>""", status_code=status_code)
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    kind = "error" if exc.status_code >= 400 else "info"
+    title = "حدث خطأ" if exc.status_code >= 400 else "رسالة"
+    return message_page(title, exc.detail or "تعذر تنفيذ الطلب", exc.status_code, request.headers.get("referer", "/dashboard"), kind)
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return message_page("بيانات غير مكتملة", "تأكد من تعبئة الحقول المطلوبة ثم حاول مرة أخرى.", 422, request.headers.get("referer", "/dashboard"), "warning")
 def format_date(date_str):
     """تحويل التاريخ من YYYY-MM-DD إلى DD/MM/YYYY"""
     try:
@@ -76,7 +104,7 @@ async def dashboard(user=Depends(get_current_user)):
 
 # ================== باني النموذج ==================
 @app.get("/admin/form-builder", response_class=HTMLResponse)
-async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db), edit_template_id: int = Query(None)):
     # جلب الأقسام من قاعدة البيانات
     root_sections = db.query(Section).filter(Section.parent_id == None).order_by(Section.order).all()
     
@@ -93,10 +121,10 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
             items = "".join(f'''<li class="flex justify-between items-center bg-white p-2 mb-1 rounded border">
               <div><span class="font-bold text-blue-700">[{f.order}]</span> {f.label} <code class="text-xs bg-gray-100 px-1 rounded">{f.field_key}</code>
               <span class="text-xs text-gray-500 ml-2">{'✓ توصيات' if f.has_recommendations else ''}</span></div>
-              <a href="/admin/form-field/edit/{f.id}" class="text-sm text-blue-600 hover:underline">✏️ تعديل</a></li>''' for f in fields)
+              <a href="/admin/form-field/edit/{f.id}?edit_template_id={edit_template_id or ''}" class="text-sm text-blue-600 hover:underline">✏️ تعديل</a></li>''' for f in fields)
             html += f'<ul class="space-y-1">{items}</ul>'
         
-        html += f'<a href="/admin/form-field/new?section_id={parent_section.id}" class="inline-block mt-2 bg-blue-600 text-white text-xs px-3 py-1 rounded">➕ إضافة حقل</a></div>'
+        html += f'<a href="/admin/form-field/new?section_id={parent_section.id}&edit_template_id={edit_template_id or ""}" class="inline-block mt-2 bg-blue-600 text-white text-xs px-3 py-1 rounded">➕ إضافة حقل</a></div>'
         
         # الأقسام الفرعية
         child_sections = db.query(Section).filter(Section.parent_id == parent_section.id).order_by(Section.order).all()
@@ -108,12 +136,15 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
     sections_html = ""
     for section in root_sections:
         sections_html += build_section_tree(section)
+    edit_template = db.query(FormTemplate).filter(FormTemplate.id == edit_template_id).first() if edit_template_id else None
+    edit_save_bar = f'<form action="/admin/templates/{edit_template.id}/update-from-builder" method="post" class="mb-4 p-3 bg-green-50 border border-green-200 rounded flex justify-between items-center"><span class="font-bold text-green-800">تعديل النموذج: {edit_template.name}</span><button class="bg-green-600 text-white px-4 py-2 rounded">حفظ التعديل على نفس النموذج</button></form>' if edit_template else ""
     
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-50 p-4"><div class="max-w-4xl mx-auto bg-white p-6 rounded shadow">
       <div class="flex justify-between items-center mb-4"><h1 class="text-xl font-bold">🛠️ باني الاستمارة</h1>
       <div class="flex gap-2"><button onclick="showSaveModal()" class="bg-green-600 text-white px-4 py-2 rounded text-sm">💾 حفظ كنموذج</button><a href="/admin/panel" class="text-blue-600">← العودة</a></div></div>
+      {edit_save_bar}
       {sections_html}</div></div>
     <div id="saveModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div class="bg-white p-6 rounded shadow-lg max-w-md w-full"><h2 class="text-xl font-bold mb-4">💾 حفظ النموذج الحالي</h2>
@@ -129,24 +160,24 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
     </script></body></html>"""
 
 @app.get("/admin/form-field/new", response_class=HTMLResponse)
-async def new_field(user=Depends(require_role(Role.ADMIN.value)), section_id: int = Query(None), db: Session = Depends(get_db)):
+async def new_field(user=Depends(require_role(Role.ADMIN.value)), section_id: int = Query(None), edit_template_id: int = Query(None), db: Session = Depends(get_db)):
     if not section_id:
         raise HTTPException(400, "يجب تحديد القسم")
     section = db.query(Section).filter(Section.id == section_id).first()
     if not section:
         raise HTTPException(404, "القسم غير موجود")
-    return _render_field_form(None, section_id, section.name, db)
+    return _render_field_form(None, section_id, section.name, db, edit_template_id)
 
 @app.get("/admin/form-field/edit/{fid}", response_class=HTMLResponse)
-async def edit_field(fid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+async def edit_field(fid: int, user=Depends(require_role(Role.ADMIN.value)), edit_template_id: int = Query(None), db: Session = Depends(get_db)):
     f = db.query(FormField).filter(FormField.id == fid).first()
     if not f:
         raise HTTPException(404)
     section = db.query(Section).filter(Section.id == f.section_id).first()
     section_name = section.name if section else "غير محدد"
-    return _render_field_form(f, f.section_id, section_name, db)
+    return _render_field_form(f, f.section_id, section_name, db, edit_template_id)
 
-def _render_field_form(field, section_id, section_name, db):
+def _render_field_form(field, section_id, section_name, db, edit_template_id=None):
     rec_categories = db.query(RecommendationCategory).order_by(RecommendationCategory.order).all()
     
     is_edit = field is not None
@@ -185,6 +216,7 @@ def _render_field_form(field, section_id, section_name, db):
       </div>
       <input type="hidden" name="section_id" value="{section_id}">
       <input type="hidden" name="id" value="{field.id if is_edit else ''}">
+      <input type="hidden" name="edit_template_id" value="{edit_template_id or ''}">
       <input type="hidden" name="options_json" id="options_json">
       <button class="w-full bg-blue-600 text-white py-2 rounded mt-4">💾 حفظ</button></form></div>
     <script>
@@ -238,7 +270,9 @@ async def save_field(request: Request, db: Session = Depends(get_db), user=Depen
         log_action(user.id, "CREATE_FIELD", field_key, request.headers.get("x-forwarded-for", request.client.host))
     
     db.commit()
-    return RedirectResponse(url="/admin/form-builder", status_code=302)
+    edit_template_id = form.get("edit_template_id")
+    redirect_url = f"/admin/form-builder?edit_template_id={edit_template_id}" if edit_template_id else "/admin/form-builder"
+    return RedirectResponse(url=redirect_url, status_code=302)
 
 # ================== إعدادات + سجل + تصدير + إحصائيات ==================
 @app.get("/admin/settings", response_class=HTMLResponse)
@@ -313,6 +347,119 @@ async def save_template(request: Request, db: Session = Depends(get_db), user=De
     db.add(template)
     db.commit()
     log_action(user.id, "CREATE_TEMPLATE", name, request.headers.get("x-forwarded-for", request.client.host))
+    return RedirectResponse(url="/admin/templates", status_code=302)
+
+@app.get("/admin/templates/{tid}/edit", response_class=HTMLResponse)
+async def edit_template_page(tid: int, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    t = db.query(FormTemplate).filter(FormTemplate.id == tid).first()
+    if not t:
+        raise HTTPException(404, "النموذج غير موجود")
+    try:
+        sections_data = json.loads(t.sections_json)
+    except:
+        raise HTTPException(400, "خطأ في بيانات النموذج")
+
+    db.query(FormField).delete()
+    db.query(Section).delete()
+    db.commit()
+    id_mapping = {}
+
+    for old_sec_id, sec_info in sections_data.items():
+        if sec_info.get("parent_id") is None:
+            new_sec = Section(name=sec_info["name"], order=sec_info.get("order", 0))
+            db.add(new_sec)
+            db.flush()
+            id_mapping[str(old_sec_id)] = new_sec.id
+            for f_data in sec_info.get("fields", []):
+                db.add(FormField(section_id=new_sec.id, field_key=f_data.get("field_key"), label=f_data.get("label"), field_type=f_data.get("field_type", "text"), is_required=f_data.get("is_required", False), options_json=f_data.get("options_json", ""), has_recommendations=f_data.get("has_recommendations", False), order=f_data.get("order", 0)))
+
+    for old_sec_id, sec_info in sections_data.items():
+        old_parent_id = sec_info.get("parent_id")
+        if old_parent_id is not None and str(old_parent_id) in id_mapping:
+            new_sec = Section(name=sec_info["name"], parent_id=id_mapping[str(old_parent_id)], order=sec_info.get("order", 0))
+            db.add(new_sec)
+            db.flush()
+            id_mapping[str(old_sec_id)] = new_sec.id
+            for f_data in sec_info.get("fields", []):
+                db.add(FormField(section_id=new_sec.id, field_key=f_data.get("field_key"), label=f_data.get("label"), field_type=f_data.get("field_type", "text"), is_required=f_data.get("is_required", False), options_json=f_data.get("options_json", ""), has_recommendations=f_data.get("has_recommendations", False), order=f_data.get("order", 0)))
+
+    db.commit()
+    return RedirectResponse(url=f"/admin/form-builder?edit_template_id={tid}", status_code=302)
+
+@app.post("/admin/templates/{tid}/edit")
+async def edit_template_submit(tid: int, request: Request, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    t = db.query(FormTemplate).filter(FormTemplate.id == tid).first()
+    if not t:
+        raise HTTPException(404, "النموذج غير موجود")
+
+    form = await request.form()
+    name = str(form.get("name", "")).strip()
+    description = str(form.get("description", "")).strip()
+    if not name:
+        raise HTTPException(400, "اسم النموذج مطلوب")
+
+    duplicate = db.query(FormTemplate).filter(FormTemplate.name == name, FormTemplate.id != tid).first()
+    if duplicate:
+        raise HTTPException(400, "اسم النموذج موجود بالفعل")
+
+    t.name = name
+    t.description = description
+    t.is_active = form.get("is_active") == "1"
+    t.updated_at = datetime.utcnow()
+
+    if form.get("refresh_from_builder") == "1":
+        sections = db.query(Section).order_by(Section.order).all()
+        sections_data = {}
+        for section in sections:
+            fields = db.query(FormField).filter(FormField.section_id == section.id, FormField.is_active == True).order_by(FormField.order).all()
+            sections_data[section.id] = {
+                "name": section.name,
+                "parent_id": section.parent_id,
+                "order": section.order,
+                "fields": [{
+                    "field_key": f.field_key,
+                    "label": f.label,
+                    "field_type": f.field_type,
+                    "is_required": f.is_required,
+                    "options_json": f.options_json,
+                    "has_recommendations": f.has_recommendations,
+                    "order": f.order
+                } for f in fields]
+            }
+        t.sections_json = json.dumps(sections_data, ensure_ascii=False)
+
+    db.commit()
+    log_action(user.id, "EDIT_TEMPLATE", name, request.headers.get("x-forwarded-for", request.client.host))
+    return RedirectResponse(url="/admin/templates", status_code=302)
+
+@app.post("/admin/templates/{tid}/update-from-builder")
+async def update_template_from_builder(tid: int, request: Request, user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
+    t = db.query(FormTemplate).filter(FormTemplate.id == tid).first()
+    if not t:
+        raise HTTPException(404, "النموذج غير موجود")
+
+    sections = db.query(Section).order_by(Section.order).all()
+    sections_data = {}
+    for section in sections:
+        fields = db.query(FormField).filter(FormField.section_id == section.id, FormField.is_active == True).order_by(FormField.order).all()
+        sections_data[section.id] = {
+            "name": section.name,
+            "parent_id": section.parent_id,
+            "order": section.order,
+            "fields": [{
+                "field_key": f.field_key,
+                "label": f.label,
+                "field_type": f.field_type,
+                "is_required": f.is_required,
+                "options_json": f.options_json,
+                "has_recommendations": f.has_recommendations,
+                "order": f.order
+            } for f in fields]
+        }
+    t.sections_json = json.dumps(sections_data, ensure_ascii=False)
+    t.updated_at = datetime.utcnow()
+    db.commit()
+    log_action(user.id, "UPDATE_TEMPLATE_FROM_BUILDER", t.name, request.headers.get("x-forwarded-for", request.client.host))
     return RedirectResponse(url="/admin/templates", status_code=302)
 
 @app.get("/admin/templates/{tid}/delete")
@@ -778,9 +925,9 @@ async def view_session(sid: int, request: Request, user=Depends(require_role(Rol
     subs = db.query(Submission).filter(Submission.session_id == sid).all()
     
     # جلب جميع الحقول لمعرفة الأقسام
-    all_fields = db.query(FormField).all()
+    all_fields = db.query(FormField).order_by(FormField.order).all()
     field_map = {f.field_key: f for f in all_fields}
-    all_sections = db.query(Section).all()
+    all_sections = db.query(Section).order_by(Section.order).all()
     section_map = {sec.id: sec for sec in all_sections}
     
     rows = ""
@@ -856,7 +1003,11 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value))
             "rec_b": [],
             "rec_c": [],
             "rec_d": []
-        }
+        },
+        "recommendation_categories": [
+            {"key": r.key, "label": r.label, "order": r.order}
+            for r in db.query(RecommendationCategory).filter(RecommendationCategory.is_active == True).order_by(RecommendationCategory.order).all()
+        ]
     }
     
     # جلب جميع الحقول من قاعدة البيانات
@@ -873,6 +1024,7 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value))
         for root in root_sections:
             merged["sections"][root.id] = {
                 "name": root.name,
+                "order": root.order,
                 "data": [],
                 "subsections": {}
             }
@@ -881,6 +1033,7 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value))
             for child in children:
                 merged["sections"][root.id]["subsections"][child.id] = {
                     "name": child.name,
+                    "order": child.order,
                     "data": []
                 }
     
@@ -891,6 +1044,18 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value))
         
         for k, v in ans.items():
             if not v or k.startswith("rec_enable_"):
+                continue
+            if k.startswith("rec_"):
+                cat_key = "rec_d"
+                for cat in ["rec_a", "rec_b", "rec_c", "rec_d"]:
+                    if k.endswith(f"_{cat}"):
+                        cat_key = cat
+                        break
+                linked_field_key = k[4:-(len(cat_key) + 1)] if k.endswith(f"_{cat_key}") else k[4:]
+                linked_field = field_map.get(linked_field_key)
+                label = linked_field.label if linked_field else linked_field_key
+                if str(v).strip():
+                    merged["recommendations"][cat_key].append(f"{label}: {str(v)}")
                 continue
                 
             field = field_map.get(k)
@@ -917,7 +1082,8 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value))
                 if section:
                     data_item = {
                         "label": field.label,
-                        "value": str(v)
+                        "value": str(v),
+                        "order": field.order
                     }
                     
                     if section.parent_id is None:
@@ -942,7 +1108,7 @@ async def generate_report(sid: int, user=Depends(require_role(Role.ADMIN.value))
 @app.get("/admin/users/export")
 async def export_users(user=Depends(require_role(Role.ADMIN.value)), db: Session = Depends(get_db)):
     users = db.query(User).all()
-    data = [{"username": u.username, "password": "123456", "role": u.role, "is_active": u.is_active} for u in users]
+    data = [{"username": u.username, "password": export_password(u.password_hash), "role": u.role, "is_active": u.is_active} for u in users]
     df = pd.DataFrame(data)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -950,7 +1116,7 @@ async def export_users(user=Depends(require_role(Role.ADMIN.value)), db: Session
     output.seek(0)
     return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=users.xlsx"})
 
-@app.post("/admin/users/import")
+@app.post("/admin/users/import", response_class=HTMLResponse)
 async def import_users(request: Request, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value)), file: UploadFile = File(...)):
     try:
         contents = await file.read()
@@ -968,7 +1134,8 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
             username = str(row["username"]).strip()
             role = str(row.get("role", "inspector")).strip()
             is_active = row.get("is_active", True)
-            password = str(row.get("password", "")).strip()
+            password_value = row.get("password", "")
+            password = "" if pd.isna(password_value) else str(password_value).strip()
             
             # التحقق من صحة الدور
             if role not in ["admin", "inspector"]:
@@ -981,12 +1148,12 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
                 if pd.notna(is_active):
                     existing.is_active = bool(is_active)
                 # تحديث كلمة المرور إذا كانت موجودة في الملف
-                if password:
+                if password and password != "LEGACY_HASH_NOT_DECRYPTABLE":
                     existing.password_hash = hash_password(password)
                 count_updated += 1
             else:
                 # إنشاء مستخدم جديد بكلمة مرور من الملف أو افتراضية
-                new_password = password if password else "123456"
+                new_password = password if password and password != "LEGACY_HASH_NOT_DECRYPTABLE" else "123456"
                 db.add(User(username=username, password_hash=hash_password(new_password), role=role))
                 count_created += 1
         
@@ -1001,6 +1168,8 @@ async def import_users(request: Request, db: Session = Depends(get_db), user=Dep
         <p class="text-sm text-gray-500 mb-4">كلمة المرور الافتراضية للمستخدمين الجدد: <code>123456</code></p>
         <a href="/admin/users" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة للمستخدمين</a>
         </div></body></html>"""
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"خطأ في الاستيراد: {str(e)}")
 if __name__ == "__main__":

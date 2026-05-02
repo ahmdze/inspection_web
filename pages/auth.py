@@ -1,15 +1,12 @@
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
-import hashlib
+from password_utils import encrypt_password, verify_password
 
 router = APIRouter()
 
 def hash_password(pw: str) -> str: 
-    return hashlib.sha256(pw.encode()).hexdigest()
-
-def verify_password(pw: str, h: str) -> bool: 
-    return hash_password(pw) == h
+    return encrypt_password(pw)
 
 def get_db():
     from database import SessionLocal

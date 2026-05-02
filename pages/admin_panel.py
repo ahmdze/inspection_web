@@ -113,7 +113,7 @@ async def admin_panel(request: Request, db: Session = Depends(get_db)):
       setTimeout(() => toast.remove(), 3000);
     }}
     </script>
-    </body></html>""".replace("{format_date(s.visit_date)}", format_date(s.visit_date))
+    </body></html>"""
 
 @router.post("/admin/create")
 async def create_session(request: Request, db: Session = Depends(get_db),

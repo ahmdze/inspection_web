@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """إنشاء المستخدم الافتراضي للتطبيق"""
 from database import SessionLocal, User, engine, Base
-import hashlib
+from password_utils import encrypt_password
 
 # إنشاء الجداول
 Base.metadata.create_all(engine)
@@ -12,7 +12,7 @@ db = SessionLocal()
 if db.query(User).count() == 0:
     # استخدام SHA256 بدلاً من bcrypt لتجنب المشاكل
     password = "Admin@123"
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    password_hash = encrypt_password(password)
     
     admin_user = User(
         username="admin",

@@ -54,6 +54,7 @@ async def admin_sessions(request: Request, db: Session = Depends(get_db)):
         <button class="px-2 py-1 rounded text-xs {'bg-yellow-500 text-white' if s.status=='open' else 'bg-green-500 text-white'}">{'🔒 إغلاق' if s.status=='open' else '🔓 فتح'}</button>
       </form>
       <a href="/admin/session/{s.id}" class="bg-blue-600 text-white px-2 py-1 rounded text-xs mr-1">عرض</a>
+      <form action="/generate/{s.id}" method="post" class="inline"><button class="bg-indigo-600 text-white px-2 py-1 rounded text-xs mr-1">تقرير</button></form>
     </td></tr>''' for s in sessions)
     
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
@@ -81,9 +82,38 @@ async def toggle_session_status(sid: int, request: Request, db: Session = Depend
     
     return RedirectResponse(url="/admin/sessions", status_code=302)
 
+@router.post("/admin/session/{sid}/template")
+async def update_session_template(sid: int, request: Request, db: Session = Depends(get_db), template_id: str = Form("")):
+    from database import InspectionSession, FormTemplate, AuditLog
+    from datetime import datetime
+
+    user = get_current_user(request, db)
+    if user.role not in ["admin"]:
+        raise HTTPException(403, "صلاحية غير كافية")
+
+    s = db.query(InspectionSession).filter(InspectionSession.id == sid).first()
+    if not s:
+        raise HTTPException(404, "الجولة غير موجودة")
+
+    if template_id:
+        template = db.query(FormTemplate).filter(FormTemplate.id == int(template_id), FormTemplate.is_active == True).first()
+        if not template:
+            raise HTTPException(404, "النموذج غير موجود أو غير نشط")
+        s.template_id = template.id
+        details = f"تعديل نموذج الجولة {s.institution} إلى {template.name}"
+    else:
+        s.template_id = None
+        details = f"إزالة النموذج الخاص بالجولة {s.institution}"
+
+    db.commit()
+    ip = request.headers.get("x-forwarded-for", request.client.host)
+    db.add(AuditLog(user_id=user.id, action="UPDATE_SESSION_TEMPLATE", details=details, ip_address=ip, timestamp=datetime.now()))
+    db.commit()
+    return RedirectResponse(url=f"/admin/session/{sid}", status_code=302)
+
 @router.get("/admin/session/{sid}", response_class=HTMLResponse)
 async def view_session(sid: int, request: Request, db: Session = Depends(get_db)):
-    from database import InspectionSession, Submission, FormField, Section, User
+    from database import InspectionSession, Submission, FormField, Section, User, FormTemplate
     import json
     
     user = get_current_user(request, db)
@@ -130,9 +160,22 @@ async def view_session(sid: int, request: Request, db: Session = Depends(get_db)
     
     # رابط الجولة
     session_url = request.url.scheme + "://" + request.headers.get("host", "") + "/inspect/" + s.session_code
+    templates = db.query(FormTemplate).filter(FormTemplate.is_active == True).order_by(FormTemplate.name).all()
+    current_template = db.query(FormTemplate).filter(FormTemplate.id == s.template_id).first() if s.template_id else None
+    template_options = '<option value="">بدون نموذج محدد</option>' + "".join(
+        f'<option value="{t.id}" {"selected" if s.template_id == t.id else ""}>{t.name}</option>' for t in templates
+    )
     
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-gray-50 p-4"><div class="max-w-4xl mx-auto bg-white p-6 rounded shadow"><h1 class="text-xl font-bold mb-4">{s.institution} | {s.visit_date}</h1>
+    <body class="bg-gray-50 p-4"><div class="max-w-4xl mx-auto bg-white p-6 rounded shadow"><div class="flex justify-between items-center mb-4"><h1 class="text-xl font-bold">{s.institution} | {s.visit_date}</h1><a href="/admin/panel" class="bg-gray-600 text-white px-4 py-2 rounded text-sm">عودة</a></div>
+    <div class="mb-4 p-4 bg-amber-50 rounded border border-amber-200">
+      <h2 class="font-bold text-amber-900">النموذج الخاص بالجولة</h2>
+      <p class="text-sm text-gray-600 mt-1 mb-3">الحالي: <span class="font-medium">{current_template.name if current_template else "بدون نموذج محدد"}</span></p>
+      <form action="/admin/session/{sid}/template" method="post" class="grid grid-cols-1 md:grid-cols-4 gap-2">
+        <select name="template_id" class="md:col-span-3 p-2 border rounded bg-white">{template_options}</select>
+        <button class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded">حفظ النموذج</button>
+      </form>
+    </div>
     <div class="mb-4 p-3 bg-blue-50 rounded border border-blue-200 flex justify-between items-center">
       <div class="flex-1 mr-3 overflow-hidden">
         <p class="text-sm text-gray-600 mb-1">رابط الجولة:</p>

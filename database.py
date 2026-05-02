@@ -100,6 +100,11 @@ def init_db():
     Base.metadata.create_all(engine)
     try:
         with SessionLocal() as db:
+            from password_utils import encrypt_password
+
+            if db.query(User).count() == 0:
+                db.add(User(username="admin", password_hash=encrypt_password("123"), role="admin", is_active=True))
+                db.commit()
             # إضافة الإعدادات الافتراضية
             if db.query(SystemSetting).count() == 0:
                 defaults = {"tg_bot_token": "", "tg_chat_id": "", "wa_api_url": "https://api.callmebot.com/whatsapp.php", "wa_api_key": "", "wa_phone": ""}
@@ -120,7 +125,7 @@ def init_db():
             # إضافة الأقسام الرئيسية الافتراضية
             if db.query(Section).count() == 0:
                 sections = [
-                    Section(name="معلومات عامة", parent_id=None, order=0),
+                    Section(name="المعلومات العامة", parent_id=None, order=0),
                     Section(name="المحور الفني", parent_id=None, order=1),
                     Section(name="المحور الإداري", parent_id=None, order=2),
                     Section(name="المحور الهندسي", parent_id=None, order=3),

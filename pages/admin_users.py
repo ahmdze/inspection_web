@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 import io
 import pandas as pd
+from password_utils import encrypt_password, export_password
 
 router = APIRouter()
 
@@ -81,7 +82,6 @@ async def create_user(request: Request, db: Session = Depends(get_db),
                       username: str = Form(...), password: str = Form(...), role: str = Form("inspector")):
     from database import User, AuditLog
     from datetime import datetime
-    import hashlib
     
     user = get_current_user(request, db)
     if user.role != "admin":
@@ -90,7 +90,7 @@ async def create_user(request: Request, db: Session = Depends(get_db),
     if db.query(User).filter(User.username == username).first(): 
         raise HTTPException(400, "موجود")
     
-    def hash_password(pw): return hashlib.sha256(pw.encode()).hexdigest()
+    def hash_password(pw): return encrypt_password(pw)
     
     db.add(User(username=username, password_hash=hash_password(password), role=role))
     db.commit()
@@ -158,13 +158,12 @@ async def edit_user_submit(uid: int, request: Request, db: Session = Depends(get
                            username: str = Form(...), password: str = Form(""), role: str = Form("inspector")):
     from database import User, AuditLog
     from datetime import datetime
-    import hashlib
     
     user = get_current_user(request, db)
     if user.role != "admin":
         raise HTTPException(403, "صلاحية غير كافية")
     
-    def hash_password(pw): return hashlib.sha256(pw.encode()).hexdigest()
+    def hash_password(pw): return encrypt_password(pw)
     
     u = db.query(User).filter(User.id == uid).first()
     if not u: 
@@ -200,7 +199,7 @@ async def export_users(request: Request, db: Session = Depends(get_db)):
     for u in users:
         data.append({
             "username": u.username, 
-            "password": u.password_hash,  # كلمة المرور المشفرة كما هي في قاعدة البيانات
+            "password": export_password(u.password_hash),
             "role": u.role, 
             "is_active": u.is_active
         })
@@ -211,17 +210,16 @@ async def export_users(request: Request, db: Session = Depends(get_db)):
     output.seek(0)
     return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=users.xlsx"})
 
-@router.post("/admin/users/import")
+@router.post("/admin/users/import", response_class=HTMLResponse)
 async def import_users(request: Request, db: Session = Depends(get_db), file: UploadFile = File(...)):
     from database import User, AuditLog
     from datetime import datetime
-    import hashlib
     
     user = get_current_user(request, db)
     if user.role != "admin":
         raise HTTPException(403, "صلاحية غير كافية")
     
-    def hash_password(pw): return hashlib.sha256(pw.encode()).hexdigest()
+    def hash_password(pw): return encrypt_password(pw)
     
     try:
         contents = await file.read()
@@ -239,7 +237,8 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
             username = str(row["username"]).strip()
             role = str(row.get("role", "inspector")).strip()
             is_active = row.get("is_active", True)
-            password = str(row.get("password", "")).strip()
+            password_value = row.get("password", "")
+            password = "" if pd.isna(password_value) else str(password_value).strip()
             
             # التحقق من صحة الدور - حذف المشرف
             if role not in ["admin", "inspector"]:
@@ -252,12 +251,12 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
                 if pd.notna(is_active):
                     existing.is_active = bool(is_active)
                 # تحديث كلمة المرور إذا كانت موجودة في الملف (تشفيرها قبل الحفظ)
-                if password:
+                if password and password != "LEGACY_HASH_NOT_DECRYPTABLE":
                     existing.password_hash = hash_password(password)
                 count_updated += 1
             else:
                 # إنشاء مستخدم جديد بكلمة مرور من الملف أو افتراضية (مع التشفير)
-                new_password = password if password else "123456"
+                new_password = password if password and password != "LEGACY_HASH_NOT_DECRYPTABLE" else "123456"
                 db.add(User(username=username, password_hash=hash_password(new_password), role=role))
                 count_created += 1
         
@@ -275,5 +274,7 @@ async def import_users(request: Request, db: Session = Depends(get_db), file: Up
         <p class="text-sm text-gray-500 mb-4">كلمة المرور الافتراضية للمستخدمين الجدد: <code>123456</code></p>
         <a href="/admin/users" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة للمستخدمين</a>
         </div></body></html>"""
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"خطأ في الاستيراد: {str(e)}")
