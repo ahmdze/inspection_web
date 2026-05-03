@@ -23,20 +23,23 @@ def get_db():
 
 def get_current_user(request: Request, db: Session):
     from itsdangerous import URLSafeTimedSerializer
+    from fastapi.responses import RedirectResponse
     serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
     token = request.cookies.get("session_token")
+    current_path = str(request.url.path)
+    if request.url.query:
+        current_path += "?" + request.url.query
     if not token:
-        raise HTTPException(401, "يجب تسجيل الدخول")
+        raise HTTPException(302, f"/login?next={current_path}")
     try:
         uid = serializer.loads(token, max_age=86400)
     except:
-        raise HTTPException(401, "انتهت الجلسة")
+        raise HTTPException(302, f"/login?next={current_path}")
     from database import User
     user = db.query(User).filter(User.id == uid).first()
     if not user or not user.is_active:
-        raise HTTPException(401, "حساب غير نشط")
+        raise HTTPException(302, f"/login?next={current_path}")
     return user
-
 
 @router.get("/inspect/success", response_class=HTMLResponse)
 async def success():

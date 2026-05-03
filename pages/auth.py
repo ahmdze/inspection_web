@@ -35,24 +35,34 @@ def get_current_user(request: Request, db: Session):
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    from urllib.parse import quote
-    # الحصول على الصفحة المطلوبة لإعادة التوجيه بعد تسجيل الدخول
     next_url = request.query_params.get("next", "/dashboard")
     
+    # إظهار رسالة خاصة فقط إذا كان قادماً من رابط جولة
+    is_inspect_redirect = "/inspect/" in next_url
+    
+    if is_inspect_redirect:
+        alert_html = f"""
+        <div class="bg-amber-50 border border-amber-300 text-amber-800 px-4 py-4 rounded-lg mb-4">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-2xl">🔒</span>
+            <p class="font-bold text-lg">يجب تسجيل الدخول أولاً</p>
+          </div>
+          <p class="text-sm">للوصول إلى جولة التفتيش، يرجى تسجيل الدخول وسيتم نقلك تلقائياً</p>
+        </div>"""
+    else:
+        alert_html = ""
+
+    import html as html_module
     return f"""<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4">
     <div class="max-w-md mx-auto bg-white p-6 rounded shadow mt-10">
     <h1 class="text-2xl font-bold text-blue-800 mb-2 text-center">نظام التفتيش الذكي المتقدم</h1>
     <p class="text-gray-500 text-center mb-4">إصدار 1.0</p>
     
-    <!-- رسالة الخطأ -->
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4 text-center">
-      <p class="font-bold mb-2">⚠️ حدث خطأ يجب تسجيل الدخول</p>
-      <p class="text-sm">للمتابعة والوصول إلى الجولة، يرجى تسجيل الدخول أولاً</p>
-    </div>
+    {alert_html}
     
     <form action="/login" method="post" class="space-y-4">
-    <input type="hidden" name="next" value="{html.escape(next_url)}">
+    <input type="hidden" name="next" value="{html_module.escape(next_url)}">
     <input name="username" placeholder="اسم المستخدم" required class="w-full p-2 border rounded">
     <input name="password" type="password" placeholder="كلمة المرور" required class="w-full p-2 border rounded">
     <div class="flex items-center">

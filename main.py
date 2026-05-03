@@ -1301,11 +1301,13 @@ async def export_form_fields(user=Depends(require_role(Role.ADMIN.value)), db: S
             
             # استخراج فئات التوصيات
             rec_cats = ""
-            if f.has_recommendations and f.recommendation_categories:
+            if f.has_recommendations:
                 try:
-                    rec_list = json.loads(f.recommendation_categories)
-                    if isinstance(rec_list, list):
-                        rec_cats = " | ".join(str(cat) for cat in rec_list)
+                    rec_cats_val = getattr(f, 'recommendation_categories', None)
+                    if rec_cats_val:
+                        rec_list = json.loads(rec_cats_val)
+                        if isinstance(rec_list, list):
+                            rec_cats ="|".join(str(cat) for cat in rec_list)
                 except Exception:
                     pass
             

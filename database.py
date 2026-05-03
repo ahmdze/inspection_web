@@ -66,6 +66,7 @@ class FormField(Base):
     condition_json = Column(Text, nullable=True)  # شروط الإظهار، مثلاً: {"field_key": "value"} يعني يظهر إذا كان field_key يساوي value
     subtitle = Column(String, nullable=True)  # نص فرعي يظهر تحت الحقل
     has_recommendations = Column(Boolean, default=False)  # هل لهذا الحقل توصيات؟
+    Recommendation_Categories = Column(Text, nullable=True)  # قائمة بفئات التوصيات المرتبطة بهذا الحقل، مخزنة كـ JSON
     order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
 
@@ -117,6 +118,9 @@ def init_db():
     if DB_PATH.startswith("sqlite"):
         with engine.connect() as conn:
             cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
+            if "recommendation_categories" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN recommendation_categories TEXT"))   # لتخزين قائمة بفئات التوصيات المرتبطة بكل مستخدم، مخزنة كـ JSON
+                conn.commit()
             if "job_title" not in cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN job_title VARCHAR"))
             if "email" not in cols:
