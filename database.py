@@ -25,7 +25,7 @@ class InspectionSession(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="open")
-    template_id = Column(Integer, ForeignKey("form_templates.id"), nullable=True) # <-- الحقل الجديد
+    template_id = Column(Integer, ForeignKey("form_templates.id"), nullable=True)
     submissions = relationship("Submission", back_populates="session")
     
 class Submission(Base):
@@ -41,7 +41,7 @@ class Submission(Base):
 class RecommendationCategory(Base):
     __tablename__ = "recommendation_categories"
     id = Column(Integer, primary_key=True)
-    key = Column(String, unique=True, nullable=False)  # rec_a, rec_b, ...
+    key = Column(String, unique=True, nullable=False)
     label = Column(String, nullable=False)
     order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
@@ -57,25 +57,25 @@ class Section(Base):
 class FormField(Base):
     __tablename__ = "form_fields"
     id = Column(Integer, primary_key=True)
-    section_id = Column(Integer, ForeignKey("sections.id"), nullable=True)  # القسم الذي ينتمي إليه الحقل
+    section_id = Column(Integer, ForeignKey("sections.id"), nullable=True)
     field_key = Column(String, unique=True, nullable=False)
     label = Column(String, nullable=False)
-    field_type = Column(String, default="text")  # text, number, textarea, select, checkbox
+    field_type = Column(String, default="text")
     is_required = Column(Boolean, default=False)
-    options_json = Column(Text, nullable=True)  # لخيارات select/checkbox
-    condition_json = Column(Text, nullable=True)  # شروط الإظهار، مثلاً: {"field_key": "value"} يعني يظهر إذا كان field_key يساوي value
-    subtitle = Column(String, nullable=True)  # نص فرعي يظهر تحت الحقل
-    has_recommendations = Column(Boolean, default=False)  # هل لهذا الحقل توصيات؟
-    Recommendation_Categories = Column(Text, nullable=True)  # قائمة بفئات التوصيات المرتبطة بهذا الحقل، مخزنة كـ JSON
+    options_json = Column(Text, nullable=True)
+    condition_json = Column(Text, nullable=True)
+    subtitle = Column(String, nullable=True)
+    has_recommendations = Column(Boolean, default=False)
+    recommendation_categories = Column(Text, nullable=True)
     order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
 
 class FormTemplate(Base):
     __tablename__ = "form_templates"
     id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False, unique=True)  # اسم النموذج
-    description = Column(Text, nullable=True)  # وصف النموذج
-    sections_json = Column(Text, nullable=False, default="{}")  # هيكل النموذج (الأقسام والحقول)
+    name = Column(String, nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    sections_json = Column(Text, nullable=False, default="{}")
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -96,17 +96,13 @@ class AuditLog(Base):
     details = Column(Text, nullable=True)
     ip_address = Column(String, nullable=True)
 
-# تحديد مسار قاعدة البيانات - يمكن تغييره عبر متغير بيئة
 DB_PATH = os.environ.get("DATABASE_URL", os.path.join(os.path.dirname(os.path.abspath(__file__)), "inspection.db"))
 
-# إذا كان المسار يبدأ بـ sqlite:/// نستخدمه كما هو، وإلا نضيف البادئة
 if DB_PATH.startswith("sqlite:///"):
     engine = create_engine(DB_PATH, connect_args={"check_same_thread": False})
 elif DB_PATH.startswith("postgresql://") or DB_PATH.startswith("postgres://"):
-    # دعم PostgreSQL لقواعد البيانات السحابية
     engine = create_engine(DB_PATH)
 else:
-    # مسار ملف محلي
     if not DB_PATH.startswith("/"):
         DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), DB_PATH)
     engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
@@ -114,19 +110,29 @@ SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
     Base.metadata.create_all(engine)
-    # هذه الأوامر خاصة بـ SQLite فقط
-    if DB_PATH.startswith("sqlite"):
+    # ترحيل قاعدة البيانات لإضافة الأعمدة الناقصة
+    try:
         with engine.connect() as conn:
-            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
-            if "recommendation_categories" not in cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN recommendation_categories TEXT"))   # لتخزين قائمة بفئات التوصيات المرتبطة بكل مستخدم، مخزنة كـ JSON
-                conn.commit()
-            if "job_title" not in cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN job_title VARCHAR"))
-            if "email" not in cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR"))
-            if "phone" not in cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR"))
+            if DB_PATH.startswith("sqlite") or DB_PATH.endswith(".db"):
+                # SQLite migration
+                cols = [row[1] for row in conn.execute(text("PRAGMA table_info(form_fields)"))]
+                if "recommendation_categories" not in cols:
+                    print("Adding recommendation_categories column to form_fields...")
+                    conn.execute(text("ALTER TABLE form_fields ADD COLUMN recommendation_categories TEXT"))
+                    conn.commit()
+            elif DB_PATH.startswith("postgresql://") or DB_PATH.startswith("postgres://"):
+                # PostgreSQL migration
+                result = conn.execute(text("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'form_fields' AND column_name = 'recommendation_categories'
+                """)).fetchall()
+                if not result:
+                    print("Adding recommendation_categories column to form_fields...")
+                    conn.execute(text("ALTER TABLE form_fields ADD COLUMN recommendation_categories TEXT"))
+                    conn.commit()
+    except Exception as e:
+        print(f"Migration warning (this is normal on first run): {e}")
+    
     try:
         with SessionLocal() as db:
             from password_utils import encrypt_password
@@ -134,13 +140,11 @@ def init_db():
             if db.query(User).count() == 0:
                 db.add(User(username="admin", password_hash=encrypt_password("123"), role="admin", job_title="مدير النظام", is_active=True))
                 db.commit()
-            # إضافة الإعدادات الافتراضية
             if db.query(SystemSetting).count() == 0:
                 defaults = {"tg_bot_token": "", "tg_chat_id": "", "wa_api_url": "https://api.callmebot.com/whatsapp.php", "wa_api_key": "", "wa_phone": ""}
                 for k, v in defaults.items(): db.add(SystemSetting(key=k, value=v))
                 db.commit()
             
-            # إضافة فئات التوصيات الافتراضية
             if db.query(RecommendationCategory).count() == 0:
                 rec_cats = [
                     RecommendationCategory(key="rec_a", label="أ/ الإيعاز إلى دائرة صحة بغداد الرصافة/ قسم التخطيط:", order=1),
@@ -151,7 +155,6 @@ def init_db():
                 db.add_all(rec_cats)
                 db.commit()
             
-            # إضافة الأقسام الرئيسية الافتراضية
             if db.query(Section).count() == 0:
                 sections = [
                     Section(name="المعلومات العامة", parent_id=None, order=0),
@@ -162,4 +165,5 @@ def init_db():
                 db.add_all(sections)
                 db.commit()
     except Exception as e: print(f"DB init warning: {e}")
+
 init_db()

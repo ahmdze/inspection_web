@@ -1,41 +1,24 @@
 ```
-# Python
-__pycache__/
+# Compiled Python files
 *.pyc
-*.pyo
-*.pyd
+__pycache__/
 
-# Database
-inspection.db
-
-# Logs
+# Logs and temp files
 *.log
+*.tmp
+*.swp
 
-# Environment
+# Environment files
 .env
 .env.local
 *.env.*
 
+# Editors
+.vscode/
+.idea/
+
 # Dependencies
 .venv/
 venv/
-pip-log.txt
-pip-selfcheck.json
-
-# Coverage reports
-.coverage
-htmlcov/
-.coverage.*
-.nyc_output/
-
-# Testing
-.pytest_cache/
-.hypothesis/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+node_modules/
 ```
