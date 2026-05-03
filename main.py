@@ -368,7 +368,11 @@ async def delete_field(fid: int, db: Session = Depends(get_db), user=Depends(req
         field_key = f.field_key
         db.delete(f)
         db.commit()
-        log_action(user.id, "DELETE_FIELD", field_key, "N/A")
+        try:
+            log_action(user.id, "DELETE_FIELD", field_key, "N/A")
+        except Exception as log_err:
+            # تجاهل أخطاء التسجيل وعدم إيقاف الحذف
+            pass
         return {"success": True}
     except Exception as e:
         db.rollback()
