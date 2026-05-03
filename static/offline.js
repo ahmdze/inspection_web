@@ -3,7 +3,7 @@ const DB='InspDB', STORE='pending'; let db;
 // تهيئة قاعدة البيانات
 function initDB(){
     return new Promise((res,rej)=>{
-        const r=indexedDB.open(DB,1);
+        const r=indexedDB.open(DB, 2);
         r.onupgradeneeded=e=>{
             db=e.target.result;
             if(!db.objectStoreNames.contains(STORE)){
@@ -57,134 +57,162 @@ function del(id){
     })
 }
 
-// مزامنة البيانات مع السيرفر
-let isSyncing = false; // منع التكرار
-let lastSyncedId = null; // تتبع آخر عنصر تمت مزامنته بنجاح لمنع التكرار
-
-async function sync(){
-    console.log('[SYNC] sync() called - navigator.onLine:', navigator.onLine);
-    
-    // منع تشغيل متزامن متعدد
-    if(isSyncing){
-        console.log('[SYNC] مزامنة جارية بالفعل - تخطي');
-        return false;
-    }
-    
+// مزامنة تقارير محددة يدوياً
+async function syncSelected(ids){
     if(!navigator.onLine){
-        console.log('[SYNC] لا يوجد اتصال - تأجيل المزامنة');
+        alert('⚠️ لا يوجد اتصال بالإنترنت! تأكد من الاتصال أولاً.');
         return false;
     }
-    
-    isSyncing = true;
-    
-    try {
-        // التأكد من تهيئة قاعدة البيانات
-        if(!db){
-            console.log('[SYNC] قاعدة البيانات غير مهيأة - جاري التهيئة...');
-            try {
-                await initDB();
-            } catch(e) {
-                console.error('[SYNC] فشل تهيئة قاعدة البيانات:', e);
-                return false;
+
+    if(!ids || ids.length === 0){
+        alert('الرجاء تحديد تقرير واحد على الأقل');
+        return false;
+    }
+
+    const all = await getPending();
+    const toSync = all.filter(item => ids.includes(item.id));
+
+    if(toSync.length === 0){
+        alert('لا توجد تقارير محددة للمزامنة');
+        return false;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for(const item of toSync){
+        try{
+            console.log('[SYNC] جاري رفع العنصر ID:', item.id);
+
+            const fd = new FormData();
+            for(const key in item){
+                if(key !== 'id' && item[key] !== null && item[key] !== undefined){
+                    fd.append(key, String(item[key]));
+                }
             }
+
+            const r = await fetch(`/inspect/submit`, {
+                method: 'POST',
+                body: fd,
+                credentials: 'include'
+            });
+
+            if(r.ok || r.status === 302){
+                await del(item.id);
+                successCount++;
+                console.log('[SYNC] تم رفع العنصر بنجاح ID:', item.id);
+            } else {
+                failCount++;
+                console.error('[SYNC] فشل الرفع ID:', item.id, 'status:', r.status);
+            }
+        } catch(e){
+            failCount++;
+            console.error('[SYNC] خطأ في الرفع ID:', item.id, e);
         }
-        
-        let successCount = 0;
-        let hasMore = true;
-        let consecutiveFailures = 0;
-        const MAX_FAILURES = 3; // الحد الأقصى للأخطاء المتتالية
-        
-        while(hasMore && consecutiveFailures < MAX_FAILURES){
-            const p = await getPending();
-            console.log('[SYNC] عدد العناصر الحالية للمزامنة:', p.length);
-            
-            if(p.length === 0){
-                console.log('[SYNC] لا توجد بيانات معلقة للرفع');
-                hasMore = false;
-                break;
-            }
-            
-            // نأخذ أول عنصر فقط
-            const item = p[0];
-            
-            // التحقق من عدم تكرار مزامنة نفس العنصر
-            if(lastSyncedId === item.id){
-                console.log('[SYNC] تحذير: محاولة إعادة مزامنة نفس العنصر ID:', item.id, '- حذفه وإعادة المحاولة');
-                // حذف العنصر المكرر ومحاولة التالي
-                try {
-                    await del(item.id);
-                    lastSyncedId = null;
-                    continue; // الانتقال للعنصر التالي
-                } catch(e){
-                    console.error('[SYNC] فشل حذف العنصر المكرر:', e);
-                    hasMore = false;
-                    break;
-                }
-            }
-            
-            try{
-                console.log('[SYNC] جاري رفع العنصر ID:', item.id);
-                
-                const fd = new FormData();
-                // إضافة جميع الحقول ما عدا id
-                for(const key in item){
-                    if(key !== 'id' && item[key] !== null && item[key] !== undefined){
-                        fd.append(key, String(item[key]));
-                    }
-                }
-                
-                console.log('[SYNC] FormData contents:');
-                for(let [key, value] of fd.entries()){
-                    console.log('  ', key, ':', value);
-                }
-                
-                const r = await fetch(`/inspect/submit`, {
-                    method: 'POST',
-                    body: fd,
-                    credentials: 'include', // مهم لإرسال الكوكيز
-                    redirect: 'manual'
-                });
-                
-                console.log('[SYNC] Response status:', r.status, r.ok);
-                
-                if(r.ok || r.status === 302){
-                    await del(item.id);
-                    successCount++;
-                    lastSyncedId = item.id; // تتبع آخر عنصر ناجح
-                    const remaining = p.length - 1;
-                    upd('✅ رفعت الإجابات المخزنة (' + remaining + ' متبقية)');
-                    console.log('[SYNC] تم رفع العنصر بنجاح - المتبقي:', remaining);
-                    consecutiveFailures = 0; // تصفير عداد الأخطاء
-                    // نكمل الحلقة لجلب القائمة المحدثة
-                } else {
-                    console.log('[SYNC] فشل الرفع - status:', r.status);
-                    try {
-                        const text = await r.text();
-                        console.log('[SYNC] Response body:', text);
-                    } catch(e) {}
-                    // إذا فشل الرفع، نزيد عداد الأخطاء
-                    consecutiveFailures++;
-                    if(consecutiveFailures >= MAX_FAILURES){
-                        console.log('[SYNC] تجاوز حد الأخطاء المتتالية - إيقاف المزامنة');
-                        hasMore = false;
-                    }
-                }
-            } catch(e){
-                console.error('[SYNC] Sync error for item', item.id, ':', e);
-                // إذا حدث خطأ، نزيد عداد الأخطاء
-                consecutiveFailures++;
-                if(consecutiveFailures >= MAX_FAILURES){
-                    console.log('[SYNC] تجاوز حد الأخطاء المتتالية - إيقاف المزامنة');
-                    hasMore = false;
-                }
-            }
+    }
+
+    renderOfflineList();
+
+    if(successCount > 0){
+        upd(`✅ تم رفع ${successCount} تقارير بنجاح`);
+    }
+    if(failCount > 0){
+        setTimeout(()=>alert(`⚠️ فشل رفع ${failCount} تقارير. حاول مرة أخرى.`), 500);
+    }
+
+    return successCount > 0;
+}
+
+// عرض قائمة التقارير المعلقة
+async function renderOfflineList(){
+    const container = document.getElementById('offline-reports-list');
+    const emptyMsg = document.getElementById('empty-offline-msg');
+    const actions = document.getElementById('offline-actions');
+    const countBadge = document.getElementById('pending-count');
+
+    if(!container) return;
+
+    const items = await getPending();
+
+    if(countBadge){
+        countBadge.textContent = items.length;
+        if(items.length > 0){
+            countBadge.style.display = 'inline-block';
+        } else {
+            countBadge.style.display = 'none';
         }
-        
-        console.log('[SYNC] انتهت المزامنة - نجح:', successCount);
-        return successCount > 0;
-        
-    } finally {
-        isSyncing = false;
+    }
+
+    if(items.length === 0){
+        container.innerHTML = '';
+        if(emptyMsg) emptyMsg.style.display = 'block';
+        if(actions) actions.style.display = 'none';
+        return;
+    }
+
+    if(emptyMsg) emptyMsg.style.display = 'none';
+    if(actions) actions.style.display = 'block';
+
+    container.innerHTML = '';
+
+    items.forEach(item => {
+        const date = new Date(item.timestamp || item.created_at || Date.now()).toLocaleString('ar-SA');
+        const location = item.location_name || item.site_id || 'غير محدد';
+        const inspector = item.inspector_name || 'مفتش';
+
+        const card = document.createElement('div');
+        card.className = 'report-card';
+        card.innerHTML = `
+            <div class="report-info">
+                <input type="checkbox" class="report-checkbox" value="${item.id}">
+                <div>
+                    <strong>تقرير #${item.id}</strong>
+                    <div class="meta">${date} - ${location}</div>
+                    <div class="sub-meta">${inspector}</div>
+                </div>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+
+    setupSelectAll();
+}
+
+function setupSelectAll(){
+    const selectAll = document.getElementById('select-all');
+    const checkboxes = document.querySelectorAll('.report-checkbox');
+
+    if(selectAll && checkboxes.length > 0){
+        selectAll.addEventListener('change', (e) => {
+            checkboxes.forEach(cb => cb.checked = e.target.checked);
+        });
+    }
+}
+
+// التعامل مع زر المزامنة اليدوية
+async function handleManualSync(){
+    const checkboxes = document.querySelectorAll('.report-checkbox:checked');
+    const statusDiv = document.getElementById('sync-status');
+
+    if(checkboxes.length === 0){
+        alert('الرجاء تحديد تقرير واحد على الأقل');
+        return;
+    }
+
+    const ids = Array.from(checkboxes).map(cb => parseInt(cb.value));
+
+    if(statusDiv){
+        statusDiv.textContent = 'جاري الرفع...';
+        statusDiv.className = 'status syncing';
+        statusDiv.classList.remove('hidden');
+    }
+
+    await syncSelected(ids);
+
+    if(statusDiv){
+        setTimeout(()=>{
+            statusDiv.classList.add('hidden');
+        }, 3000);
     }
 }
 
@@ -194,53 +222,38 @@ function upd(m){
     if(e){
         e.textContent=m;
         e.classList.remove('hidden');
-        // إخفاء الرسالة بعد 5 ثواني
         setTimeout(()=>e.classList.add('hidden'), 5000);
     }
 }
 
 // دالة التعامل مع الإرسال عند عدم الاتصال
 window.handleOfflineSubmit = async function(form, code){
-    console.log('[OFFLINE] handleOfflineSubmit called - offline mode');
-    
     const btn=form.querySelector('button[type=submit]');
     const originalText = btn.textContent;
     btn.disabled=true;
     btn.textContent='جاري الحفظ...';
-    
+
     const formData = new FormData(form);
     const data = {};
-    
-    // جمع جميع البيانات من النموذج
+
     for(const [key, value] of formData.entries()){
-        if(key !== 'code'){ // إزالة حقل code
+        if(key !== 'code'){
             data[key] = value;
         }
     }
-    
-    console.log('[OFFLINE] Data to save:', data);
-    
+
     try{
-        await initDB(); // التأكد من تهيئة قاعدة البيانات
+        await initDB();
         await save(data);
-        console.log('[OFFLINE] تم الحفظ في IndexedDB بنجاح', data);
-        upd('💾 تم الحفظ محلياً - سيرفع عند الاتصال');
-        
-        // عرض رسالة واضحة للمستخدم
-        alert('✅ تم حفظ البيانات محلياً بنجاح!\n\nسيتم رفعها تلقائياً عند الاتصال بالإنترنت.\nيمكنك إغلاق المتصفح والعودة لاحقاً.');
-        
-        setTimeout(()=>{
-            window.location.href='/inspect/success';
-        }, 1500);
+        upd('💾 تم الحفظ محلياً');
+        alert('✅ تم حفظ البيانات محلياً بنجاح!\n\nانتقل إلى صفحة \"التقارير المعلقة\" لرفعها عند العودة للاتصال.');
+        window.location.href='/inspect/success';
     }catch(e){
-        console.error('[OFFLINE] فشل الحفظ في IndexedDB:', e);
-        // Fallback إلى localStorage
+        console.error('[OFFLINE] فشل الحفظ:', e);
         localStorage.setItem('pending_submission_' + Date.now(), JSON.stringify(data));
         upd('💾 تم الحفظ محلياً (localStorage)');
         alert('✅ تم حفظ البيانات محلياً بنجاح!');
-        setTimeout(()=>{
-            window.location.href='/inspect/success';
-        }, 1000);
+        window.location.href='/inspect/success';
     } finally {
         btn.disabled = false;
         btn.textContent = originalText;
@@ -252,24 +265,28 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     try{
         await initDB();
         console.log('[INIT] IndexedDB initialized');
+
+        if(document.getElementById('offline-reports-list')){
+            renderOfflineList();
+
+            const syncBtn = document.getElementById('sync-selected-btn');
+            if(syncBtn){
+                syncBtn.addEventListener('click', handleManualSync);
+            }
+        }
+
         upd(navigator.onLine?'🌐 متصل':'📴 أوفلاين - يحفظ محلياً');
-        
+
         window.addEventListener('online',()=>{
-            console.log('[EVENT] الاتصال استُعيد - بدء المزامنة');
-            upd('🔄 جاري المزامنة...');
-            setTimeout(() => sync(), 500); // تأخير بسيط للتأكد من استقرار الاتصال
+            console.log('[EVENT] الاتصال استُعيد');
+            upd('🌐 عاد الاتصال - يمكنك رفع التقارير الآن');
         });
-        
+
         window.addEventListener('offline',()=>{
             console.log('[EVENT] انقطع الاتصال');
             upd('📴 انقطع - يحفظ محلياً')
         });
-        
-        // محاولة المزامنة كل 60 ثانية (زيادة الفترة لتجنب التكرار)
-        setInterval(sync, 60000);
-        
-        // محاولة مزامنة فورية بعد 2 ثانية
-        setTimeout(sync, 2000);
+
     }catch(e){
         console.error('[INIT] فشل تهيئة IndexedDB:', e);
     }

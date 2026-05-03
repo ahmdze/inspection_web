@@ -26,15 +26,11 @@ def get_current_user(request: Request, db: Session):
     serializer = URLSafeTimedSerializer("SECRET_CHANGE_ME_IN_PROD", salt="auth-session")
     token = request.cookies.get("session_token")
     if not token:
-        # حفظ الصفحة المطلوبة لإعادة التوجيه بعد تسجيل الدخول
-        current_path = str(request.url)
-        raise HTTPException(status_code=302, detail="/login?next=" + current_path)
+        raise HTTPException(401, "يجب تسجيل الدخول")
     try:
         uid = serializer.loads(token, max_age=86400)
     except:
-        # حفظ الصفحة المطلوبة لإعادة التوجيه بعد تسجيل الدخول
-        current_path = str(request.url)
-        raise HTTPException(status_code=302, detail="/login?next=" + current_path)
+        raise HTTPException(401, "انتهت الجلسة")
     from database import User
     user = db.query(User).filter(User.id == uid).first()
     if not user or not user.is_active:
@@ -44,51 +40,55 @@ def get_current_user(request: Request, db: Session):
 
 @router.get("/inspect/success", response_class=HTMLResponse)
 async def success():
-    return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-50 p-4 flex items-center justify-center h-screen"><div id="sync-status" class="fixed top-0 left-0 right-0 bg-green-600 text-white text-center py-2 font-bold hidden"></div><div class="bg-white p-8 rounded shadow text-center"><h1 class="text-2xl font-bold text-green-600 mb-2">✅ تم الحفظ بنجاح</h1><p class="text-gray-600 mb-4">سيتم دمج البيانات في التقرير النهائي.</p><p id="sync-msg" class="text-sm text-blue-600 mb-4"></p><a href="/inspect/dashboard" class="inline-block bg-blue-600 text-white px-6 py-2 rounded">العودة للوحة</a></div></body><script src="/static/offline.js"></script><script>
-// عرض حالة المزامنة في صفحة النجاح
-document.addEventListener('DOMContentLoaded', async () => {
-    const syncMsg = document.getElementById('sync-msg');
-    
-    // التحقق من وجود بيانات معلقة
-    if (typeof getPending === 'function') {
-        try {
-            await initDB();
-            const pending = await getPending();
-            if (pending.length > 0) {
-                syncMsg.textContent = '📦 لديك ' + pending.length + ' تقرير قيد الانتظار للرفع';
-                syncMsg.classList.add('animate-pulse');
-                
-                // بدء المزامنة فوراً إذا كان متصلاً
-                if (navigator.onLine) {
-                    syncMsg.textContent = '🔄 جاري رفع البيانات المعلقة...';
-                    await sync();
-                    // انتظار قليل للتأكد من اكتمال الحذف
-                    setTimeout(async () => {
-                        const remaining = await getPending();
-                        if (remaining.length === 0) {
-                            syncMsg.textContent = '✅ تم رفع جميع البيانات بنجاح!';
-                            syncMsg.classList.remove('animate-pulse');
-                            syncMsg.classList.add('text-green-600');
-                        } else if (remaining.length < pending.length) {
-                            syncMsg.textContent = '⚠️ تم رفع بعض البيانات، لا يزال هناك ' + remaining.length + ' تقرير لم ترفع';
-                        } else {
-                            syncMsg.textContent = '⚠️ لا يزال هناك ' + remaining.length + ' تقرير لم ترفع - حاول مرة أخرى';
-                        }
-                    }, 1000);
-                } else {
-                    syncMsg.textContent = '📴 ستُرفع البيانات تلقائياً عند الاتصال بالإنترنت';
-                }
-            } else {
-                syncMsg.textContent = '✅ لا توجد بيانات معلقة';
-                syncMsg.classList.add('text-green-600');
-            }
-        } catch(e) {
-            console.error('Error checking pending submissions:', e);
-            syncMsg.textContent = '⚠️ حدث خطأ أثناء فحص البيانات المعلقة';
-        }
-    }
-});
-</script></html>"""
+    return """<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="https://cdn.tailwindcss.com"></script><style>
+        .report-card{background:#fff;padding:15px;margin:10px 0;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);display:flex;align-items:center;justify-content:space-between}
+        .report-info{display:flex;align-items:center;gap:10px;flex:1}
+        .report-checkbox{width:20px;height:20px;cursor:pointer}
+        .meta{font-size:12px;color:#666;margin-top:4px}
+        .sub-meta{font-size:11px;color:#999}
+        .status{padding:10px;margin:10px 0;border-radius:6px;text-align:center;font-weight:bold}
+        .status.syncing{background:#fff3cd;color:#856404}
+        .status.success{background:#d4edda;color:#155724}
+        .status.error{background:#f8d7da;color:#721c24}
+        .btn{padding:12px 24px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:16px}
+        .btn-primary{background:#007bff;color:#fff}
+        .btn-primary:hover{background:#0056b3}
+        .btn-primary:disabled{background:#ccc;cursor:not-allowed}
+    </style></head><body class="bg-gray-50 p-4">
+    <div id="sync-status" class="fixed top-0 left-0 right-0 bg-green-600 text-white text-center py-2 font-bold hidden"></div>
+    <div class="max-w-2xl mx-auto bg-white p-6 rounded shadow mt-8">
+        <h1 class="text-2xl font-bold text-green-600 mb-2">📋 التقارير المعلقة</h1>
+        <p class="text-gray-600 mb-4">حدد التقارير التي تريد رفعها عند العودة للاتصال بالإنترنت</p>
+
+        <div id="pending-count-badge" class="inline-block bg-blue-600 text-white px-3 py-1 rounded-full text-sm mb-4">
+            📦 <span id="pending-count">0</span> تقرير معلق
+        </div>
+
+        <div id="empty-offline-msg" class="text-center py-8 text-gray-500" style="display:none">
+            ✅ لا توجد تقارير معلقة - جميع التقارير تم رفعها بنجاح!
+        </div>
+
+        <div id="offline-reports-list" class="space-y-2"></div>
+
+        <div id="offline-actions" class="mt-6 pt-4 border-t" style="display:none">
+            <div class="flex items-center gap-4 mb-4">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="select-all" class="w-5 h-5">
+                    <span>تحديد الكل</span>
+                </label>
+            </div>
+            <button id="sync-selected-btn" class="btn btn-primary w-full">
+                🚀 رفع المحدد الآن
+            </button>
+            <div id="sync-status-inline" class="status hidden"></div>
+        </div>
+
+        <div class="mt-6 text-center">
+            <a href="/inspect/dashboard" class="text-blue-600 hover:underline">← العودة للوحة التحكم</a>
+        </div>
+    </div>
+    <script src="/static/offline.js"></script>
+    </body></html>"""
 
 
 @router.get("/inspect/dashboard", response_class=HTMLResponse)
@@ -348,7 +348,7 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
       }}
       if (document.getElementById('axis-selector'))
         showSection(document.getElementById('axis-selector').value);
-      
+
       // التعامل مع إرسال النموذج
       document.getElementById('inspection-form').addEventListener('submit', async function(e) {{
         e.preventDefault();
@@ -357,11 +357,11 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
         const originalText = btn.textContent;
         btn.disabled = true;
         btn.textContent = 'جاري الحفظ...';
-        
+
         const code = form.querySelector('input[name="code"]').value;
         const sessionId = form.querySelector('input[name="session_id"]').value;
-        
-        try {{
+
+        try{{
           if (navigator.onLine) {{
             // متصل بالإنترنت - أرسل مباشرة
             const formData = new FormData(form);
@@ -376,7 +376,7 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
               throw new Error('فشل الإرسال');
             }}
           }} else {{
-            // غير متصل - احفظ محلياً
+            // غير متصل - احفظ محلياً وانتقل لصفحة التقارير المعلقة
             if (window.handleOfflineSubmit) {{
               await window.handleOfflineSubmit(form, code);
             }} else {{
@@ -386,12 +386,9 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
                 session_id: sessionId,
                 ...Object.fromEntries(new FormData(form))
               }};
-              localStorage.setItem('pending_submission', JSON.stringify(data));
-              document.getElementById('sync-status').textContent = '💾 تم الحفظ محلياً - سيرفع عند الاتصال';
-              document.getElementById('sync-status').classList.remove('hidden');
-              setTimeout(() => {{
-                window.location.href = '/inspect/success';
-              }}, 1000);
+              localStorage.setItem('pending_submission_' + Date.now(), JSON.stringify(data));
+              alert('✅ تم حفظ البيانات محلياً بنجاح!\\n\\nانتقل إلى صفحة \"التقارير المعلقة\" لرفعها عند العودة للاتصال.');
+              window.location.href = '/inspect/success';
             }}
           }}
         }} catch (error) {{
@@ -402,12 +399,9 @@ async def inspect_form(code: str, request: Request, db: Session = Depends(get_db
             session_id: sessionId,
             ...Object.fromEntries(new FormData(form))
           }};
-          localStorage.setItem('pending_submission', JSON.stringify(data));
-          document.getElementById('sync-status').textContent = '💾 تم الحفظ محلياً - سيرفع عند الاتصال';
-          document.getElementById('sync-status').classList.remove('hidden');
-          setTimeout(() => {{
-            window.location.href = '/inspect/success';
-          }}, 1000);
+          localStorage.setItem('pending_submission_' + Date.now(), JSON.stringify(data));
+          alert('✅ تم حفظ البيانات محلياً بنجاح!\\n\\nانتقل إلى صفحة \"التقارير المعلقة\" لرفعها عند العودة للاتصال.');
+          window.location.href = '/inspect/success';
         }} finally {{
           btn.disabled = false;
           btn.textContent = originalText;
@@ -427,16 +421,16 @@ async def submit_dynamic(request: Request, db: Session = Depends(get_db), bg=Non
 
     user = get_current_user(request, db)
     form = await request.form()
-    
+
     # تحويل session_id إلى رقم صحيح
     try:
         session_id = int(form.get("session_id", 0))
     except (ValueError, TypeError):
         session_id = 0
-    
+
     if session_id == 0:
         raise HTTPException(400, "رقم الجلسة غير صحيح")
-    
+
     sess = db.query(InspectionSession).filter(
         InspectionSession.id == session_id,
         InspectionSession.status == "open"
