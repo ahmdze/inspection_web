@@ -302,6 +302,9 @@ async def save_field(request: Request, db: Session = Depends(get_db), user=Depen
     options_json = form.get("options_json", "")
     is_required = "is_required" in form
     has_recommendations = "has_recommendations" in form
+    # معالجة فئات التوصيات
+    rec_cats = form.getlist("rec_cat")
+    recommendation_categories = json.dumps(rec_cats) if rec_cats else None
 
     # التحقق من الحقول المطلوبة
     if not field_key or not label:
@@ -316,6 +319,7 @@ async def save_field(request: Request, db: Session = Depends(get_db), user=Depen
             f.options_json = options_json
             f.is_required = is_required
             f.has_recommendations = has_recommendations
+            f.recommendation_categories = recommendation_categories
             log_action(user.id, "EDIT_FIELD", field_key, request.headers.get("x-forwarded-for", request.client.host))
     else:
         if db.query(FormField).filter(FormField.field_key == field_key).first():
@@ -328,7 +332,8 @@ async def save_field(request: Request, db: Session = Depends(get_db), user=Depen
             order=order,
             options_json=options_json,
             is_required=is_required,
-            has_recommendations=has_recommendations
+            has_recommendations=has_recommendations,
+            recommendation_categories=recommendation_categories
         )
         db.add(f)
         log_action(user.id, "CREATE_FIELD", field_key, request.headers.get("x-forwarded-for", request.client.host))
