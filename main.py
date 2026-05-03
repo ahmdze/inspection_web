@@ -136,7 +136,8 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
             items = "".join(f'''<li class="flex justify-between items-center bg-white p-2 mb-1 rounded border">
               <div><span class="font-bold text-blue-700">[{f.order}]</span> {f.label} <code class="text-xs bg-gray-100 px-1 rounded">{f.field_key}</code>
               <span class="text-xs text-gray-500 ml-2">{'✓ توصيات' if f.has_recommendations else ''}</span></div>
-              <a href="/admin/form-field/edit/{f.id}?edit_template_id={edit_tid or ''}" class="text-sm text-blue-600 hover:underline">✏️ تعديل</a></li>''' for f in fields)
+              <div class="flex gap-2"><a href="/admin/form-field/edit/{f.id}?edit_template_id={edit_tid or ''}" class="text-sm text-blue-600 hover:underline">✏️ تعديل</a>
+              <button onclick="deleteField({f.id}, '{f.label}')" class="text-sm text-red-600 hover:underline">🗑️ حذف</button></div></li>''' for f in fields)
             html += f'<ul class="space-y-1">{items}</ul>'
         
         html += f'<a href="/admin/form-field/new?section_id={parent_section.id}&edit_template_id={edit_tid or ""}" class="inline-block mt-2 bg-blue-600 text-white text-xs px-3 py-1 rounded">➕ إضافة حقل</a></div>'
@@ -173,6 +174,21 @@ async def form_builder(user=Depends(require_role(Role.ADMIN.value)), db: Session
     <script>
       function showSaveModal() {{ document.getElementById('saveModal').classList.remove('hidden'); }}
       function closeSaveModal() {{ document.getElementById('saveModal').classList.add('hidden'); }}
+      async function deleteField(fieldId, fieldName) {{
+        if (!confirm('هل أنت متأكد من حذف الحقل \"' + fieldName + '\"؟\\n\\nلا يمكن التراجع عن هذا الإجراء!')) return;
+        try {{
+          const res = await fetch('/admin/form-field/delete/' + fieldId, {{ method: 'POST' }});
+          const data = await res.json();
+          if (data.success) {{
+            alert('✅ تم حذف الحقل بنجاح!');
+            window.location.reload();
+          }} else {{
+            alert('❌ خطأ: ' + data.error);
+          }}
+        }} catch(err) {{
+          alert('❌ خطأ في الاتصال: ' + err.message);
+        }}
+      }}
       async function handleImport(input) {{
         const file = input.files[0];
         if (!file) return;
@@ -342,6 +358,21 @@ async def save_field(request: Request, db: Session = Depends(get_db), user=Depen
     edit_template_id = form.get("edit_template_id")
     redirect_url = f"/admin/form-builder?edit_template_id={edit_template_id}" if edit_template_id else "/admin/form-builder"
     return RedirectResponse(url=redirect_url, status_code=302)
+
+@app.post("/admin/form-field/delete/{fid}")
+async def delete_field(fid: int, db: Session = Depends(get_db), user=Depends(require_role(Role.ADMIN.value))):
+    f = db.query(FormField).filter(FormField.id == fid).first()
+    if not f:
+        return {"success": False, "error": "الحقل غير موجود"}
+    try:
+        field_key = f.field_key
+        db.delete(f)
+        db.commit()
+        log_action(user.id, "DELETE_FIELD", field_key, "N/A")
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
 
 # ================== إعدادات + سجل + تصدير + إحصائيات ==================
 @app.get("/admin/settings", response_class=HTMLResponse)
